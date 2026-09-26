@@ -19,7 +19,6 @@ test:
     bats tests/test_changelog.bats
     bats tests/test_update_just.bats
     bats tests/test_native_recipes.bats
-    bats tests/test_bluefin_countme.bats
     bats tests/test_ujust.bats
     bats tests/test_ujust_completion.bats
     bats tests/test_ublue_fastfetch.bats

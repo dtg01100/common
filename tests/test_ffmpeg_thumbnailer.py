@@ -209,3 +209,58 @@ def test_serve_recovering_rebinds_after_socket_deleted(daemon_mod, tmp_path):
     stop.set()
     thread.join(timeout=5)
     assert not thread.is_alive(), "serve_recovering should stop when signaled"
+
+
+def test_socket_survives_gnome_gst_registry_cleanup(daemon_mod, shim_mod, tmp_path):
+    # After every thumbnail, gnome-desktop's clean_gst_registry_dir() calls
+    # g_remove() (C remove()) on each top-level entry of the gst cache dir
+    # except gstreamer-1.0.registry. The daemon and shim must agree on a socket
+    # path that this non-recursive cleanup cannot delete, otherwise the next
+    # back-to-back thumbnail finds no socket.
+    import ctypes
+    import tempfile
+
+    # Keep the path short: AF_UNIX paths are capped at 108 bytes and pytest's
+    # tmp_path is too deep to hold the real layout.
+    short_root = tempfile.TemporaryDirectory(prefix="fft", dir="/tmp")
+    cache_home = Path(short_root.name) / "cache"
+    gst_dir = cache_home / "gnome-desktop-thumbnailer" / "gstreamer-1.0"
+    rel = os.path.relpath(daemon_mod.SOCK_PATH, daemon_mod.GST_CACHE_DIR)
+    sock_path = str(gst_dir / rel)
+    # gnome-desktop creates this directory (create_gst_cache_dir()).
+    gst_dir.mkdir(parents=True)
+
+    with mock.patch.dict(os.environ, {"XDG_CACHE_HOME": str(cache_home)}):
+        os.environ.pop("FFT_SOCKET", None)
+        stop = threading.Event()
+        thread = threading.Thread(
+            target=daemon_mod.serve_recovering,
+            args=(sock_path, daemon_mod.Handler, stop),
+            daemon=True,
+        )
+        thread.start()
+        try:
+            deadline = time.monotonic() + 5
+            while not os.path.exists(sock_path) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert shim_mod.get_socket_path() == sock_path
+            (gst_dir / "gstreamer-1.0.registry").write_bytes(b"")
+            inode = os.stat(sock_path).st_ino
+
+            libc = ctypes.CDLL(None, use_errno=True)
+            for name in os.listdir(gst_dir):
+                if name != "gstreamer-1.0.registry":
+                    libc.remove(str(gst_dir / name).encode())
+
+            # No wait: the very next thumbnail must still reach the daemon.
+            assert os.stat(sock_path).st_ino == inode
+            conn = socket.socket(socket.AF_UNIX)
+            conn.settimeout(2)
+            conn.connect(sock_path)
+            conn.sendall(b"PING\n")
+            assert conn.recv(64) == b"OK\n"
+            conn.close()
+        finally:
+            stop.set()
+            thread.join(timeout=5)
+            short_root.cleanup()

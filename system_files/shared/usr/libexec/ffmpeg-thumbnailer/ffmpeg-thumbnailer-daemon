@@ -3,9 +3,12 @@
 Host-side daemon for ffmpeg-thumbnailer.
 
 Listens on a UNIX domain socket inside the GStreamer plugin cache directory
-(~/.cache/gnome-desktop-thumbnailer/gstreamer-1.0/ffmpeg-thumbnailer.sock),
+(~/.cache/gnome-desktop-thumbnailer/gstreamer-1.0/ffmpeg-thumbnailer/sock),
 which is the one writable host path that GNOME's thumbnailer bubblewrap sandbox
-binds through at its real host location.
+binds through at its real host location. The socket lives in a subdirectory
+because gnome-desktop's clean_gst_registry_dir() runs g_remove() on every
+top-level entry after each thumbnail; remove() cannot delete a non-empty
+directory, so the subdirectory and the socket inside it survive.
 
 The in-sandbox shim opens the input file and output thumbnail and passes their
 file descriptors over SCM_RIGHTS. This daemon invokes:
@@ -35,7 +38,8 @@ GST_CACHE_DIR = os.path.join(
 )
 
 SOCK_PATH = os.environ.get(
-    "FFT_SOCKET", os.path.join(GST_CACHE_DIR, "ffmpeg-thumbnailer.sock")
+    "FFT_SOCKET",
+    os.path.join(GST_CACHE_DIR, "ffmpeg-thumbnailer", "sock"),
 )
 
 _default_inflight = max(1, min(4, (os.cpu_count() or 2) // 2))
@@ -190,18 +194,19 @@ class DaemonServer(socketserver.ThreadingUnixStreamServer):
 def serve_recovering(sock_path, handler, stop, poll_interval=0.5):
     """Serve requests at sock_path, rebinding if the path is removed.
 
-    GNOME's gstreamer clean_gst_registry_dir() periodically deletes the
-    contents of ~/.cache/gnome-desktop-thumbnailer, including the socket
-    path. When that removes the socket the old listener keeps serving on a
-    now-dead path and every new connection fails. Detect the missing path
-    and rebind at the same path so the next connection succeeds without a
-    full daemon restart. Request handling runs in per-request threads
+    The socket's parent subdirectory survives gnome-desktop's
+    clean_gst_registry_dir(), but the path can still disappear (for example
+    when the user clears ~/.cache). The old listener would then keep serving
+    on a dead path and every new connection would fail. Detect the missing
+    path and rebind at the same path so the next connection succeeds without
+    a full daemon restart. Request handling runs in per-request threads
     (ThreadingUnixStreamServer), so this poll loop never blocks on a long
     request.
     """
     state = {"server": None}
 
     def make_server():
+        os.makedirs(os.path.dirname(sock_path), mode=0o700, exist_ok=True)
         # Remove any stale socket at the path before rebinding so the new
         # listener owns a fresh inode.
         if os.path.exists(sock_path):

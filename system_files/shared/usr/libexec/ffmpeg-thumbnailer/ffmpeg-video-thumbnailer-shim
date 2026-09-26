@@ -5,8 +5,8 @@ ffmpeg-video-thumbnailer-shim
 Runs inside GNOME's thumbnailer bubblewrap sandbox, where no container runtime
 can start (--unshare-all plus seccomp filter denying unshare/mount/CLONE_NEWUSER).
 Hands the thumbnailing job to the ffmpeg-thumbnailer-daemon over a UNIX socket
-located in ~/.cache/gnome-desktop-thumbnailer/gstreamer-1.0/, which is the one
-writable host directory GNOME binds through at its real host path.
+located in ~/.cache/gnome-desktop-thumbnailer/gstreamer-1.0/ffmpeg-thumbnailer/,
+inside the one writable host directory GNOME binds through at its real host path.
 
 Usage: ffmpeg-video-thumbnailer-shim [-s SIZE] <INPUT> <OUTPUT>
 """
@@ -28,7 +28,8 @@ def get_socket_path() -> str | None:
             cache_home,
             "gnome-desktop-thumbnailer",
             "gstreamer-1.0",
-            "ffmpeg-thumbnailer.sock",
+            "ffmpeg-thumbnailer",
+            "sock",
         ),
         os.path.join(os.environ.get("XDG_RUNTIME_DIR", ""), "ffmpeg-thumbnailer.sock"),
         f"/run/user/{os.getuid()}/ffmpeg-thumbnailer.sock",
