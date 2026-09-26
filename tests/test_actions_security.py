@@ -111,13 +111,21 @@ jobs:
     assert "Dangerous untrusted PR checkout detected" in result.stdout
 
 
-def test_scanner_detects_forbidden_top_level_write_permissions(tmp_path: Path):
+@pytest.mark.parametrize(
+    "permissions_block",
+    [
+        "permissions: write-all",
+        "permissions:\n  contents: write",
+        "permissions:\n  contents: read\n  packages: write\n  id-token: write",
+    ],
+)
+def test_scanner_detects_forbidden_top_level_write_permissions(tmp_path: Path, permissions_block: str):
     """The scanner must flag top-level write-all or write scope permissions."""
-    wf = tmp_path / "write-all.yml"
-    wf.write_text("""
-name: Write All Workflow
+    wf = tmp_path / "write-scope.yml"
+    wf.write_text(f"""
+name: Write Scope Workflow
 on: [push]
-permissions: write-all
+{permissions_block}
 jobs:
   test:
     runs-on: ubuntu-latest

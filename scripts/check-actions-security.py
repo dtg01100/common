@@ -2,8 +2,8 @@
 """Validate GitHub Actions workflows against the Project Bluefin Actions Security Baseline.
 
 Checks:
-1. Top-level permissions: Workflows must declare top-level 'permissions:' (typically 'permissions: {}'
-   or explicit minimal grants) to fail closed.
+1. Top-level permissions: Workflows must declare top-level 'permissions: {}' (or 'read-all' / a
+   read-only mapping) to fail closed; write scopes must be granted per job.
 2. SHA pinning: All external (third-party) actions must be pinned to a full 40-character commit SHA
    with a version comment.
 3. pull_request_target restrictions: Workflows triggered by pull_request_target must not perform
@@ -62,31 +62,33 @@ def check_workflow_file(path: Path) -> List[SecurityIssue]:
             issues.append(SecurityIssue(str(path), None, f"YAML parse error: {e}"))
             return issues
 
-    # 1. Check top-level permissions
+    # 1. Check top-level permissions: must be '{}', 'read-all', or a read-only mapping
     has_top_level_perms = False
-    top_level_perm_issues: List[str] = []
+    perms = None
     if workflow_data is not None and isinstance(workflow_data, dict):
         if "permissions" in workflow_data and workflow_data["permissions"] is not None:
             has_top_level_perms = True
             perms = workflow_data["permissions"]
-            if perms == "write-all":
-                top_level_perm_issues.append(
-                    "Top-level 'permissions: write-all' is forbidden. "
-                    "Baseline requires fail-closed top-level permissions (e.g. 'permissions: {}' or explicit scoped permissions)."
-                )
     else:
-        # Fallback line-based check: look for top-level permissions: at col 0
-        for line in lines:
-            m_top = re.match(r"^permissions:\s*(.*)", line)
-            if m_top:
-                has_top_level_perms = True
-                val = m_top.group(1).strip()
-                if val == "write-all":
-                    top_level_perm_issues.append(
-                        "Top-level 'permissions: write-all' is forbidden. "
-                        "Baseline requires fail-closed top-level permissions (e.g. 'permissions: {}' or explicit scoped permissions)."
-                    )
-                break
+        # Fallback line-based parse: top-level 'permissions:' at col 0 plus its indented scopes
+        for idx, line in enumerate(lines):
+            m_top = re.match(r"^permissions:\s*([^#]*)", line)
+            if not m_top:
+                continue
+            has_top_level_perms = True
+            val = m_top.group(1).strip()
+            if val:
+                perms = {} if val == "{}" else val
+            else:
+                perms = {}
+                for scope_line in lines[idx + 1 :]:
+                    if scope_line.strip() == "" or scope_line.lstrip().startswith("#"):
+                        continue
+                    m_scope = re.match(r"^\s+([\w-]+):\s*([\w-]+)", scope_line)
+                    if not m_scope:
+                        break
+                    perms[m_scope.group(1)] = m_scope.group(2)
+            break
 
     if not has_top_level_perms:
         issues.append(
@@ -98,8 +100,32 @@ def check_workflow_file(path: Path) -> List[SecurityIssue]:
                 "to fail closed on unconfigured jobs.",
             )
         )
-    for issue_msg in top_level_perm_issues:
-        issues.append(SecurityIssue(str(path), None, issue_msg))
+    elif isinstance(perms, dict):
+        write_scopes = sorted(
+            f"{scope}: {level}"
+            for scope, level in perms.items()
+            if level not in ("read", "none")
+        )
+        if write_scopes:
+            issues.append(
+                SecurityIssue(
+                    str(path),
+                    None,
+                    f"Top-level permissions grant non-read scopes ({', '.join(write_scopes)}), which is forbidden. "
+                    "Baseline requires 'permissions: {}' or a read-only top-level mapping; "
+                    "grant write scopes per job.",
+                )
+            )
+    elif perms != "read-all":
+        issues.append(
+            SecurityIssue(
+                str(path),
+                None,
+                f"Top-level 'permissions: {perms}' is forbidden. "
+                "Baseline requires 'permissions: {}' or a read-only top-level mapping; "
+                "grant write scopes per job.",
+            )
+        )
 
     # 2. Check uses: pinning and version comments
     for i, line in enumerate(lines, 1):
