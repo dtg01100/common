@@ -15,7 +15,7 @@ IOWeight=20
 MemoryHigh=512M
 MemoryMax=1024M
 TasksMax=512
-ManagedOOMMemory=kill
+ManagedOOMMemoryPressure=kill
 Nice=10
 IOSchedulingClass=idle
 

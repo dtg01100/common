@@ -25,7 +25,4 @@ IOWeight=20
 MemoryHigh=512M
 MemoryMax=1024M
 TasksMax=64
-ManagedOOMMemory=kill
-
-[Install]
-WantedBy=default.target
+ManagedOOMMemoryPressure=kill
