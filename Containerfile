@@ -20,26 +20,37 @@ RUN apk add just curl
 
 # ChairLift ships only as a user-scoped Homebrew cask, which cannot install
 # root-owned files. Install the pkexec helper, its PolicyKit policy and the
-# three GSettings schemas from the checksummed release archive so every image
-# gets them from common; the composed image runs glib-compile-schemas after
-# overlaying system_files. Renovate bumps CHAIRLIFT_RELEASE but not the two
-# archive checksums: recompute both or the sha256sum -c gate fails the build.
+# three GSettings schemas from the release archive so every image gets them
+# from common; the composed image runs glib-compile-schemas after overlaying
+# system_files. The release's checksums.txt is verified against its Sigstore
+# bundle, signed by ChairLift's release workflow for exactly this tag, and the
+# archive against its checksums.txt entry, so a bump changes CHAIRLIFT_RELEASE only.
 ARG CHAIRLIFT_RELEASE=v26.09.0-alpha.4
-ARG CHAIRLIFT_SHA256_AMD64=e6a56064d6df42e86d2f34da9a25e461e1466cd6778fb525cdffca15a59b4f81
-ARG CHAIRLIFT_SHA256_ARM64=554bddb1f91b09ad4a91789d50beda6b1c17245bd3bca9af78b05f203865b53d
 ARG TARGETARCH
+COPY --from=ghcr.io/sigstore/cosign/cosign:v3.0.2@sha256:b29487e48205d875c324c79583e2806d9d269c0fa299e0861bbec023d8430c8b /ko-app/cosign /usr/local/bin/cosign
 RUN set -eu; \
     case "${TARGETARCH}" in \
-      amd64) sha256="${CHAIRLIFT_SHA256_AMD64}" ;; \
-      arm64) sha256="${CHAIRLIFT_SHA256_ARM64}" ;; \
+      amd64|arm64) ;; \
       *) echo "no ChairLift release archive for TARGETARCH '${TARGETARCH}'" >&2; exit 1 ;; \
     esac; \
     version="${CHAIRLIFT_RELEASE#v}"; \
-    archive="/tmp/chairlift_${version}_linux_${TARGETARCH}.tar.gz"; \
-    curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 2 \
-      --output "$archive" \
-      "https://github.com/projectbluefin/chairlift/releases/download/${CHAIRLIFT_RELEASE}/chairlift_${version}_linux_${TARGETARCH}.tar.gz"; \
-    echo "${sha256}  $archive" | sha256sum -c -; \
+    archive="chairlift_${version}_linux_${TARGETARCH}.tar.gz"; \
+    install -d /tmp/chairlift-release; \
+    cd /tmp/chairlift-release; \
+    for asset in checksums.txt checksums.txt.sigstore.json "$archive"; do \
+      curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 2 \
+        --output "$asset" \
+        "https://github.com/projectbluefin/chairlift/releases/download/${CHAIRLIFT_RELEASE}/${asset}"; \
+    done; \
+    cosign verify-blob --bundle checksums.txt.sigstore.json \
+      --certificate-identity "https://github.com/projectbluefin/chairlift/.github/workflows/release.yml@refs/tags/${CHAIRLIFT_RELEASE}" \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      checksums.txt; \
+    awk -v archive="$archive" 'NF == 2 && $2 == archive' checksums.txt > "$archive.sha256"; \
+    if [ "$(wc -l < "$archive.sha256")" -ne 1 ]; then \
+      echo "checksums.txt has no single entry for $archive" >&2; exit 1; \
+    fi; \
+    sha256sum -c "$archive.sha256"; \
     install -d /tmp/chairlift; \
     tar -xzf "$archive" -C /tmp/chairlift \
       chairlift-helper \

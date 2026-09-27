@@ -17,9 +17,11 @@ persistent configuration-error toast. So a typo in this config is not a
 cosmetic defect; it ships an empty app to every user.
 """
 
+import os
 from pathlib import Path
 import re
 import shlex
+import subprocess
 
 import pytest
 import yaml
@@ -388,32 +390,136 @@ def _chairlift_installs(step: str) -> dict[str, tuple[str, str]]:
     return installs
 
 
-def test_chairlift_release_pins_one_version_and_both_arch_checksums():
-    """common is built natively per arch, so each build must verify the archive
-    for its own TARGETARCH against a pinned hash -- an amd64-only hash would
-    make every arm64 build fail, and a missing arch must stop the build."""
+#: The only identity allowed to sign a ChairLift release's checksums.txt:
+#: upstream's release workflow, running for the exact tag being installed.
+CHAIRLIFT_SIGNER = (
+    "https://github.com/projectbluefin/chairlift/.github/workflows/release.yml"
+    "@refs/tags/${CHAIRLIFT_RELEASE}"
+)
+CHAIRLIFT_SIGNER_ISSUER = "https://token.actions.githubusercontent.com"
+
+
+def _chairlift_commands(step: str) -> list[str]:
+    """The RUN body split into its `;`-terminated shell commands."""
+    body = step[step.index("RUN ") :].replace("\\\n", " ")
+    return [" ".join(cmd.split()) for cmd in body.split(";") if cmd.strip()]
+
+
+def _first_command_index(commands: list[str], prefix: str) -> int:
+    return next(i for i, cmd in enumerate(commands) if cmd.startswith(prefix))
+
+
+def test_chairlift_release_pins_one_version_and_no_archive_hash():
+    """A bump must be a one-line change: the tag is the only pin and the
+    archive hash comes from the signed checksums.txt of that release."""
     containerfile = (ROOT / "Containerfile").read_text(encoding="utf-8")
     releases = re.findall(r"^ARG CHAIRLIFT_RELEASE=(\S+)$", containerfile, re.MULTILINE)
     assert len(releases) == 1, f"expected exactly one ChairLift release pin, got {releases}"
     assert re.fullmatch(r"v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?", releases[0])
 
     step = _chairlift_archive_step()
-    hashes = dict(re.findall(r"^ARG CHAIRLIFT_SHA256_(AMD64|ARM64)=([0-9a-f]{64})$", step, re.MULTILINE))
-    assert set(hashes) == {"AMD64", "ARM64"}
-    assert hashes["AMD64"] != hashes["ARM64"]
-    assert "\nARG TARGETARCH\n" in step, "TARGETARCH must be declared to be visible to RUN"
-
-    arches = dict(re.findall(r"^\s+(\w+)\) sha256=\"\$\{CHAIRLIFT_SHA256_(\w+)\}\" ;;", step, re.MULTILINE))
-    assert arches == {"amd64": "AMD64", "arm64": "ARM64"}
-    assert re.search(r"^\s+\*\) .*exit 1 ;;", step, re.MULTILINE), "unknown TARGETARCH must fail"
-
-    assert "RUN set -eu;" in step
-    assert (
-        "https://github.com/projectbluefin/chairlift/releases/download/${CHAIRLIFT_RELEASE}/"
-        "chairlift_${version}_linux_${TARGETARCH}.tar.gz" in step
+    hashes = re.findall(r"(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])", step)
+    cosign_digest = re.search(r"cosign:\S+@sha256:([0-9a-f]{64})", step)
+    assert cosign_digest and hashes == [cosign_digest.group(1)], (
+        f"only the cosign image digest may be pinned in the ChairLift step, found {hashes}"
     )
-    assert 'echo "${sha256}  $archive" | sha256sum -c -;' in step
-    assert step.index("sha256sum -c") < step.index("tar -xzf"), "verify before extracting"
+    assert "CHAIRLIFT_SHA256" not in containerfile
+
+    assert "\nARG TARGETARCH\n" in step, "TARGETARCH must be declared to be visible to RUN"
+    commands = _chairlift_commands(step)
+    assert commands[0] == "RUN set -eu"
+    assert 'case "${TARGETARCH}" in amd64|arm64)' in commands
+    default = next(
+        i for i, cmd in enumerate(commands) if re.fullmatch(r'\*\) echo ".*TARGETARCH.*" >&2', cmd)
+    )
+    assert commands[default + 1] == "exit 1", "an arch without a release archive must fail the build"
+    assert 'archive="chairlift_${version}_linux_${TARGETARCH}.tar.gz"' in commands
+    assert 'for asset in checksums.txt checksums.txt.sigstore.json "$archive"' in commands
+    assert (
+        '"https://github.com/projectbluefin/chairlift/releases/download/'
+        '${CHAIRLIFT_RELEASE}/${asset}"' in step
+    )
+
+
+def test_chairlift_cosign_comes_from_a_digest_pinned_image():
+    """The verifier is part of the trust chain, so it must be immutable."""
+    step = _chairlift_archive_step()
+    copies = re.findall(r"^COPY --from=(\S+) /ko-app/cosign /usr/local/bin/cosign$", step, re.MULTILINE)
+    assert len(copies) == 1, "cosign must be copied from its image exactly once"
+    assert re.fullmatch(r"ghcr\.io/sigstore/cosign/cosign:v[\d.]+@sha256:[0-9a-f]{64}", copies[0])
+    assert step.index("COPY --from=") < step.index("RUN ")
+
+
+def test_chairlift_checksums_signature_is_verified_before_any_use():
+    """checksums.txt is only trustworthy once cosign proves upstream's release
+    workflow signed it for this very tag. A regexp identity, a missing
+    issuer, or reading the file first would let any signer or no signer in."""
+    commands = _chairlift_commands(_chairlift_archive_step())
+    verify = _first_command_index(commands, "cosign verify-blob ")
+    assert shlex.split(commands[verify]) == [
+        "cosign",
+        "verify-blob",
+        "--bundle",
+        "checksums.txt.sigstore.json",
+        "--certificate-identity",
+        CHAIRLIFT_SIGNER,
+        "--certificate-oidc-issuer",
+        CHAIRLIFT_SIGNER_ISSUER,
+        "checksums.txt",
+    ]
+    downloads = _first_command_index(commands, "done")
+    for consumer in ("awk ", "sha256sum ", "tar "):
+        first_use = _first_command_index(commands, consumer)
+        assert downloads < verify < first_use, f"`{consumer.strip()}` runs before verify-blob"
+
+
+def _checksum_selection(step: str) -> str:
+    """The shell that picks the archive's line out of checksums.txt."""
+    commands = _chairlift_commands(step)
+    start = _first_command_index(commands, "awk ")
+    end = commands.index("fi")
+    return "; ".join(commands[start : end + 1])
+
+
+@pytest.mark.parametrize(
+    ("arch", "expected"),
+    [
+        ("amd64", "a" * 64 + "  chairlift_1.2.3-alpha.4_linux_amd64.tar.gz\n"),
+        ("arm64", None),
+    ],
+    ids=["entry-present", "entry-missing"],
+)
+def test_chairlift_archive_is_checked_against_its_exact_checksums_entry(tmp_path, arch, expected):
+    """Run the Containerfile's own selection logic: it must take only the line
+    naming this archive exactly (not its .sbom.json sibling, not a filename
+    that merely contains it) and fail when checksums.txt has none."""
+    step = _chairlift_archive_step()
+    commands = _chairlift_commands(step)
+    assert 'sha256sum -c "$archive.sha256"' in commands
+    assert _first_command_index(commands, "sha256sum ") < _first_command_index(commands, "tar ")
+
+    (tmp_path / "checksums.txt").write_text(
+        "a" * 64 + "  chairlift_1.2.3-alpha.4_linux_amd64.tar.gz\n"
+        + "b" * 64 + "  chairlift_1.2.3-alpha.4_linux_amd64.tar.gz.sbom.json\n"
+        + "c" * 64 + "  chairlift_1.2.3-alpha.4_linux_arm64.tar.gz.sbom.json\n"
+        + "d" * 64 + "  xchairlift_1.2.3-alpha.4_linux_arm64.tar.gz\n",
+        encoding="utf-8",
+    )
+    archive = f"chairlift_1.2.3-alpha.4_linux_{arch}.tar.gz"
+    result = subprocess.run(
+        ["sh", "-euc", _checksum_selection(step)],
+        cwd=tmp_path,
+        env={"PATH": os.environ["PATH"], "archive": archive},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if expected is None:
+        assert result.returncode != 0, "a missing checksums.txt entry must fail the build"
+        assert f"no single entry for {archive}" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / f"{archive}.sha256").read_text(encoding="utf-8") == expected
 
 
 def test_chairlift_system_files_install_to_exact_paths_and_modes():

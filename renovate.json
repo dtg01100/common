@@ -40,7 +40,7 @@
     },
     {
       "customType": "regex",
-      "description": "Track the ChairLift release whose helper, PolicyKit policy and GSettings schemas the Containerfile installs. CHAIRLIFT_SHA256_AMD64 and CHAIRLIFT_SHA256_ARM64 next to it are NOT Renovate-managed: a bump must be completed by hand (recompute both archive hashes) or the build fails its sha256sum -c gate, so these PRs are never automerged.",
+      "description": "Track the ChairLift release whose helper, PolicyKit policy and GSettings schemas the Containerfile installs. CHAIRLIFT_RELEASE is the only pin: the build verifies the release's signed checksums.txt for that tag, so a bump is this one line.",
       "managerFilePatterns": [
         "/^Containerfile$/"
       ],
@@ -93,7 +93,7 @@
       "automerge": false
     },
     {
-      "description": "ChairLift bumps also require manual sha256 updates (CHAIRLIFT_SHA256_AMD64/CHAIRLIFT_SHA256_ARM64 in the Containerfile), so they must never automerge. ChairLift publishes prereleases only, so unstable versions must be offered.",
+      "description": "ChairLift bumps install a root-owned pkexec helper, so a human reviews each one: never automerge. ChairLift publishes prereleases only, so unstable versions must be offered.",
       "matchDepNames": [
         "projectbluefin/chairlift"
       ],

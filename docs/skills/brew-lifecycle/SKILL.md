@@ -115,18 +115,20 @@ The schema validator pin must follow the release in the `ublue-os/tap` cask.
 
 The cask cannot install root-owned files, so common ships ChairLift's system
 files for every image that consumes it: the common `Containerfile` downloads
-the release archive for the build's `TARGETARCH`, verifies it with
-`sha256sum -c`, and installs `/usr/bin/chairlift-helper` (0755), its PolicyKit
-policy `/usr/share/polkit-1/actions/io.projectbluefin.chairlift.ublue.policy`,
-and the three `io.projectbluefin.chairlift.{livery,updates,firstrun}.gschema.xml`
+the release archive for the build's `TARGETARCH` with the release's
+`checksums.txt`, verifies that file's Sigstore bundle with `cosign verify-blob`
+(signer: ChairLift's `release.yml` workflow for exactly that tag), checks the
+archive against its `checksums.txt` line with `sha256sum -c`, and installs
+`/usr/bin/chairlift-helper` (0755), its PolicyKit policy
+`/usr/share/polkit-1/actions/io.projectbluefin.chairlift.ublue.policy`, and the
+three `io.projectbluefin.chairlift.{livery,updates,firstrun}.gschema.xml`
 schemas under `/usr/share/glib-2.0/schemas/` (0644). Downstream images need no
 ChairLift pin of their own; the composed image must run
 `glib-compile-schemas /usr/share/glib-2.0/schemas` after overlaying the shared
-files. The pin is `ARG CHAIRLIFT_RELEASE` plus `CHAIRLIFT_SHA256_AMD64` and
-`CHAIRLIFT_SHA256_ARM64`: Renovate proposes the release bump (never automerged)
-and the two archive hashes must be recomputed by hand in the same PR. The
-build fails if the policy authorizes any helper path other than
-`/usr/bin/chairlift-helper`.
+files. To bump, change `ARG CHAIRLIFT_RELEASE`; there is no hash to copy.
+Renovate proposes that one-line PR and never automerges it, because it installs
+a new root helper. The build fails if the policy authorizes any helper path
+other than `/usr/bin/chairlift-helper`.
 
 Bootc staging is authenticated and stage-only. ChairLift invokes the
 PolicyKit-gated `/usr/libexec/bootc-update-stage` helper, which runs plain

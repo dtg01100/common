@@ -297,10 +297,9 @@ def test_chairlift_versioning_orders_prereleases():
 
 
 def test_chairlift_updates_offer_prereleases_and_do_not_automerge():
-    """CHAIRLIFT_SHA256_AMD64/ARM64 are not Renovate-managed, so a Renovate-only
-    bump fails the build's sha256sum -c gate and must never automerge. And
-    without ignoreUnstable: false Renovate would not offer the prerelease-only
-    ChairLift tags at all."""
+    """Each ChairLift bump installs a new root-owned pkexec helper, so a human
+    reviews it and it must never automerge. And without ignoreUnstable: false
+    Renovate would not offer the prerelease-only ChairLift tags at all."""
     package_rules = _load_config().get("packageRules", [])
     rules = [
         rule
@@ -311,7 +310,7 @@ def test_chairlift_updates_offer_prereleases_and_do_not_automerge():
     rule = rules[0]
     assert rule.get("automerge") is False
     assert rule.get("ignoreUnstable") is False
-    assert "matchUpdateTypes" not in rule, "the manual sha256 step applies to every bump"
+    assert "matchUpdateTypes" not in rule, "review applies to every bump, patch included"
 
     automerge_index = next(
         i for i, r in enumerate(package_rules) if r.get("automerge") is True
