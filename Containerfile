@@ -18,6 +18,24 @@ COPY --from=ghcr.io/ublue-os/bluefin-wallpapers-gnome:latest@sha256:470572484d5b
 
 RUN apk add just curl
 
+# ChairLift's user-scoped cask does not install GSettings schemas system-wide.
+# Extract only the three schema files from the checksummed release archive;
+# the composed image runs glib-compile-schemas after overlaying system_files.
+ARG CHAIRLIFT_RELEASE=v26.09.0-alpha.2
+RUN set -eu; \
+    version="${CHAIRLIFT_RELEASE#v}"; \
+    archive="/tmp/chairlift_${version}_linux_amd64.tar.gz"; \
+    curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 2 \
+      --output "$archive" \
+      "https://github.com/projectbluefin/chairlift/releases/download/${CHAIRLIFT_RELEASE}/chairlift_${version}_linux_amd64.tar.gz"; \
+    echo "18f630bb7de0e921ba12ae8c0650adf5e550b0cde203938d73d534382f196d08  $archive" | sha256sum -c -; \
+    install -d /tmp/chairlift /out/shared/usr/share/glib-2.0/schemas; \
+    tar -xzf "$archive" -C /tmp/chairlift \
+      data/io.projectbluefin.chairlift.livery.gschema.xml \
+      data/io.projectbluefin.chairlift.updates.gschema.xml \
+      data/io.projectbluefin.chairlift.firstrun.gschema.xml; \
+    install -m0644 /tmp/chairlift/data/*.gschema.xml /out/shared/usr/share/glib-2.0/schemas/
+
 # Artwork repo points to ~/.local/share for metadata
 RUN mkdir -p /out/bluefin/usr/share/backgrounds/bluefin && \
   mv /out/bluefin/usr/share/*.jxl /out/bluefin/usr/share/*.xml /out/bluefin/usr/share/backgrounds/bluefin && \
