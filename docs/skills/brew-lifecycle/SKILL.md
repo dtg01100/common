@@ -1,7 +1,7 @@
 ---
 name: brew-lifecycle
 version: "1.5"
-last_updated: "2026-09-23"
+last_updated: "2026-09-27"
 id: brew-lifecycle
 one_line_purpose: Manage OS-managed Homebrew packages and RPM/brew placement.
 entry_point: docs/skills/brew-lifecycle/SKILL.md
@@ -112,10 +112,21 @@ ChairLift fails closed on schema drift: an unknown page, group, or field key in
 `config.yml` disables the whole application. Keep policy that has no upstream
 key in YAML comments, and verify with `python3 tests/check-chairlift-config`.
 The schema validator pin must follow the release in the `ublue-os/tap` cask.
-The GSettings schemas are not installed by the user-scoped cask: the common
-`Containerfile` extracts their three XML files from that same checksummed
-release archive, and the composed image must run `glib-compile-schemas` after
-overlaying the shared files.
+
+The cask cannot install root-owned files, so common ships ChairLift's system
+files for every image that consumes it: the common `Containerfile` downloads
+the release archive for the build's `TARGETARCH`, verifies it with
+`sha256sum -c`, and installs `/usr/bin/chairlift-helper` (0755), its PolicyKit
+policy `/usr/share/polkit-1/actions/io.projectbluefin.chairlift.ublue.policy`,
+and the three `io.projectbluefin.chairlift.{livery,updates,firstrun}.gschema.xml`
+schemas under `/usr/share/glib-2.0/schemas/` (0644). Downstream images need no
+ChairLift pin of their own; the composed image must run
+`glib-compile-schemas /usr/share/glib-2.0/schemas` after overlaying the shared
+files. The pin is `ARG CHAIRLIFT_RELEASE` plus `CHAIRLIFT_SHA256_AMD64` and
+`CHAIRLIFT_SHA256_ARM64`: Renovate proposes the release bump (never automerged)
+and the two archive hashes must be recomputed by hand in the same PR. The
+build fails if the policy authorizes any helper path other than
+`/usr/bin/chairlift-helper`.
 
 Bootc staging is authenticated and stage-only. ChairLift invokes the
 PolicyKit-gated `/usr/libexec/bootc-update-stage` helper, which runs plain

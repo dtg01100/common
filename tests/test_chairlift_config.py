@@ -339,23 +339,114 @@ def test_schema_validator_pins_the_shipped_chairlift_release():
     )
 
 
-def test_chairlift_schemas_are_staged_and_compiled_for_composed_images():
-    containerfile = (ROOT / "Containerfile").read_text(encoding="utf-8")
-    release = "v26.09.0-alpha.2"
-    archive_sha256 = "18f630bb7de0e921ba12ae8c0650adf5e550b0cde203938d73d534382f196d08"
-    schema_names = (
-        "io.projectbluefin.chairlift.livery.gschema.xml",
-        "io.projectbluefin.chairlift.updates.gschema.xml",
-        "io.projectbluefin.chairlift.firstrun.gschema.xml",
+#: Where the Containerfile installs each file from the ChairLift release
+#: archive, keyed by image path: (install mode, archive member). The cask
+#: cannot install root-owned files, so these are the image's contract with
+#: the ChairLift GUI; the GUI binary, desktop file, icons and the updex
+#: helper are deliberately absent.
+CHAIRLIFT_SYSTEM_FILES = {
+    "/usr/bin/chairlift-helper": ("0755", "chairlift-helper"),
+    "/usr/share/polkit-1/actions/io.projectbluefin.chairlift.ublue.policy": (
+        "0644",
+        "data/io.projectbluefin.chairlift.ublue.policy",
+    ),
+    "/usr/share/glib-2.0/schemas/io.projectbluefin.chairlift.livery.gschema.xml": (
+        "0644",
+        "data/io.projectbluefin.chairlift.livery.gschema.xml",
+    ),
+    "/usr/share/glib-2.0/schemas/io.projectbluefin.chairlift.updates.gschema.xml": (
+        "0644",
+        "data/io.projectbluefin.chairlift.updates.gschema.xml",
+    ),
+    "/usr/share/glib-2.0/schemas/io.projectbluefin.chairlift.firstrun.gschema.xml": (
+        "0644",
+        "data/io.projectbluefin.chairlift.firstrun.gschema.xml",
+    ),
+}
+
+
+def _chairlift_archive_step() -> str:
+    """The Containerfile's ChairLift pins plus the RUN that consumes them."""
+    lines = (ROOT / "Containerfile").read_text(encoding="utf-8").splitlines()
+    start = next(
+        i for i, line in enumerate(lines) if line.startswith("ARG CHAIRLIFT_RELEASE=")
     )
+    run = next(i for i in range(start, len(lines)) if lines[i].startswith("RUN "))
+    end = next(i for i in range(run, len(lines)) if not lines[i].endswith("\\"))
+    return "\n".join(lines[start : end + 1])
 
-    assert f"ARG CHAIRLIFT_RELEASE={release}" in containerfile
-    assert archive_sha256 in containerfile
-    assert "/out/shared/usr/share/glib-2.0/schemas/" in containerfile
-    for name in schema_names:
-        assert f"data/{name}" in containerfile
-        assert name in containerfile
 
+def _chairlift_installs(step: str) -> dict[str, tuple[str, str]]:
+    """Map image path -> (mode, archive member) for every install in the step."""
+    installs = {}
+    for mode, src, dst in re.findall(r"install -Dm(\d+) (\S+) (\S+?);?(?: \\)?$", step, re.MULTILINE):
+        src = src.strip('"')
+        if src == "$policy":
+            src = re.search(r"^\s*policy=(\S+);", step, re.MULTILINE).group(1)
+        assert dst.startswith("/out/shared/"), f"{dst} is not staged into /out/shared"
+        installs[dst.removeprefix("/out/shared")] = (mode, src.removeprefix("/tmp/chairlift/"))
+    return installs
+
+
+def test_chairlift_release_pins_one_version_and_both_arch_checksums():
+    """common is built natively per arch, so each build must verify the archive
+    for its own TARGETARCH against a pinned hash -- an amd64-only hash would
+    make every arm64 build fail, and a missing arch must stop the build."""
+    containerfile = (ROOT / "Containerfile").read_text(encoding="utf-8")
+    releases = re.findall(r"^ARG CHAIRLIFT_RELEASE=(\S+)$", containerfile, re.MULTILINE)
+    assert len(releases) == 1, f"expected exactly one ChairLift release pin, got {releases}"
+    assert re.fullmatch(r"v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?", releases[0])
+
+    step = _chairlift_archive_step()
+    hashes = dict(re.findall(r"^ARG CHAIRLIFT_SHA256_(AMD64|ARM64)=([0-9a-f]{64})$", step, re.MULTILINE))
+    assert set(hashes) == {"AMD64", "ARM64"}
+    assert hashes["AMD64"] != hashes["ARM64"]
+    assert "\nARG TARGETARCH\n" in step, "TARGETARCH must be declared to be visible to RUN"
+
+    arches = dict(re.findall(r"^\s+(\w+)\) sha256=\"\$\{CHAIRLIFT_SHA256_(\w+)\}\" ;;", step, re.MULTILINE))
+    assert arches == {"amd64": "AMD64", "arm64": "ARM64"}
+    assert re.search(r"^\s+\*\) .*exit 1 ;;", step, re.MULTILINE), "unknown TARGETARCH must fail"
+
+    assert "RUN set -eu;" in step
+    assert (
+        "https://github.com/projectbluefin/chairlift/releases/download/${CHAIRLIFT_RELEASE}/"
+        "chairlift_${version}_linux_${TARGETARCH}.tar.gz" in step
+    )
+    assert 'echo "${sha256}  $archive" | sha256sum -c -;' in step
+    assert step.index("sha256sum -c") < step.index("tar -xzf"), "verify before extracting"
+
+
+def test_chairlift_system_files_install_to_exact_paths_and_modes():
+    step = _chairlift_archive_step()
+    assert _chairlift_installs(step) == CHAIRLIFT_SYSTEM_FILES
+
+    # Naming each member makes tar fail the build when upstream drops one.
+    tar = re.search(r'tar -xzf "\$archive" -C /tmp/chairlift((?: \\\n\s+[^\s;]+)+);', step)
+    assert tar, "the archive must be extracted by explicit member list"
+    members = re.findall(r"\\\n\s+([^\s;]+)", tar.group(1))
+    assert sorted(members) == sorted(member for _, member in CHAIRLIFT_SYSTEM_FILES.values())
+
+
+def test_chairlift_policy_is_gated_on_the_installed_helper_path():
+    """pkexec runs whatever path the policy's exec.path names. If upstream
+    moves the helper, the fetched policy would authorize a path nothing
+    installs, so the build must refuse a policy that names any other path."""
+    step = _chairlift_archive_step()
+    helper = next(
+        path for path, (mode, _) in CHAIRLIFT_SYSTEM_FILES.items() if mode == "0755"
+    )
+    assert (
+        "grep -qF '<annotate key=\"org.freedesktop.policykit.exec.path\">"
+        f"{helper}</annotate>' \"$policy\";" in step
+    )
+    assert (
+        "grep -F 'org.freedesktop.policykit.exec.path' \"$policy\" | "
+        f"grep -vqF '>{helper}<'; then" in step
+    )
+    assert step.index('"$policy";') < step.index("install -Dm")
+
+
+def test_chairlift_schemas_are_compiled_for_composed_images():
     compose_workflow = (ROOT / ".github/workflows/pr-e2e.yml").read_text(
         encoding="utf-8"
     )

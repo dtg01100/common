@@ -200,13 +200,40 @@ Homebrew environment that a GDM-launched session PATH lacks, and `/var/home` is
 the real path (`/home` is a symlink on bootc systems). The per-user copies the
 cask still writes for the first user are harmless duplicates of the same entry.
 
-The Livery, Updates, and First-run settings also require the three
-`io.projectbluefin.chairlift.{livery,updates,firstrun}.gschema.xml` files under
-`/usr/share/glib-2.0/schemas/`. The common `Containerfile` extracts only these
-schemas from the checksummed ChairLift release archive pinned to the cask; the
-composed image runs `glib-compile-schemas` after overlaying shared files so
-GSettings can load them. When the cask release changes, update both
-`CHAIRLIFT_SCHEMA_REF` and the archive checksum together.
+### Root-owned system files from the release archive
+
+ChairLift is distributed only through the cask, and a cask cannot install
+root-owned files. The pkexec helper, the PolicyKit policy that authorizes it,
+and the GSettings schemas therefore come from the image, and common is the
+shared layer every image consumes. The common `Containerfile` build stage
+downloads `chairlift_<version>_linux_${TARGETARCH}.tar.gz` from the pinned
+release, verifies it with `sha256sum -c`, extracts only these members, and
+installs them into `/out/shared`:
+
+| Image path | Mode | Archive member |
+|---|---|---|
+| `/usr/bin/chairlift-helper` | 0755 | `chairlift-helper` |
+| `/usr/share/polkit-1/actions/io.projectbluefin.chairlift.ublue.policy` | 0644 | `data/io.projectbluefin.chairlift.ublue.policy` |
+| `/usr/share/glib-2.0/schemas/io.projectbluefin.chairlift.livery.gschema.xml` | 0644 | `data/io.projectbluefin.chairlift.livery.gschema.xml` |
+| `/usr/share/glib-2.0/schemas/io.projectbluefin.chairlift.updates.gschema.xml` | 0644 | `data/io.projectbluefin.chairlift.updates.gschema.xml` |
+| `/usr/share/glib-2.0/schemas/io.projectbluefin.chairlift.firstrun.gschema.xml` | 0644 | `data/io.projectbluefin.chairlift.firstrun.gschema.xml` |
+
+The build fails on a checksum mismatch, on an architecture without a pinned
+hash, on a missing archive member, and on a policy whose
+`org.freedesktop.policykit.exec.path` names anything but
+`/usr/bin/chairlift-helper`. The GUI binary, the desktop file and icons (see
+above), the updex helper and its policy are not installed from the archive;
+the bootc policy ships from `system_files` with `bootc-update-stage`. The
+composed image runs `glib-compile-schemas /usr/share/glib-2.0/schemas` after
+overlaying the shared files so GSettings can load the schemas (`pr-e2e.yml`
+does the same). Downstream images carry no ChairLift pin of their own.
+
+To bump, change `ARG CHAIRLIFT_RELEASE` and recompute both
+`CHAIRLIFT_SHA256_AMD64` and `CHAIRLIFT_SHA256_ARM64` from the new release's
+`checksums.txt`. Renovate tracks `CHAIRLIFT_RELEASE` (`projectbluefin/chairlift`,
+prereleases included, regex versioning so `alpha.N` ordering is kept) but not the
+hashes, so its PRs are never automerged and must be completed by hand. This
+pin is independent of `CHAIRLIFT_SCHEMA_REF`, which follows the cask.
 
 ---
 
