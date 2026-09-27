@@ -111,6 +111,11 @@ content or lifecycle code.
 ChairLift fails closed on schema drift: an unknown page, group, or field key in
 `config.yml` disables the whole application. Keep policy that has no upstream
 key in YAML comments, and verify with `python3 tests/check-chairlift-config`.
+The schema validator pin must follow the release in the `ublue-os/tap` cask.
+The GSettings schemas are not installed by the user-scoped cask: the common
+`Containerfile` extracts their three XML files from that same checksummed
+release archive, and the composed image must run `glib-compile-schemas` after
+overlaying the shared files.
 
 Bootc staging is authenticated and stage-only. ChairLift invokes the
 PolicyKit-gated `/usr/libexec/bootc-update-stage` helper, which runs plain
@@ -198,7 +203,7 @@ After any change to `preinstall.d/` or `brew-preinstall`:
 - [ ] Linux casks use `arm64_linux:` / `x86_64_linux:` checksum keys
 - [ ] If adding a cask: it is recorded under `.casks` and removal uses `brew uninstall --cask`
 - [ ] If touching ChairLift: `python3 tests/check-chairlift-config` passes (networked; not part of `just check`)
-- [ ] If bumping the ChairLift cask: `CHAIRLIFT_SCHEMA_REF` in `tests/check-chairlift-config` and the vendored desktop file/icons move in the same change
+- [ ] If bumping the ChairLift cask: update `CHAIRLIFT_SCHEMA_REF`, the schema archive pin, and vendored desktop/icons together; compile GSettings schemas after merging shared files into the composed image
 - [ ] Bundle and uninstall failures leave the previous state hash intact for retry
 - [ ] The systemd user unit remains ordered after `graphical-session.target`, in `background.slice`, and at reduced I/O weight
 - [ ] User units do not reference the system manager's `network-online.target`; network failures use the service retry policy

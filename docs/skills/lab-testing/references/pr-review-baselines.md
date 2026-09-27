@@ -77,36 +77,6 @@ systemctl is-enabled uupd.timer       # enabled
 systemctl cat uupd.service | grep '\[Install\]'  # should be absent (timer-driven)
 ```
 
-### Worked example — PR #769 (NVIDIA flatpak runtime sync)
-
-**Baseline state** (bluefin:testing non-nvidia, workflow `pr769-nvidia-check-thx78`):
-
-| Artifact | Baseline state |
-|---|---|
-| `ublue-nvidia-flatpak-runtime-sync.service` | **ABSENT** — nvidia overlay not applied to non-nvidia image |
-| `/sys/module/nvidia/version` | **NOT FOUND** — correct for QEMU |
-| nvidia units in `systemctl --failed` | None |
-
-**Verdict:** Green baseline. The service's `ConditionPathExists=/sys/module/nvidia/version` means PR changes (`TimeoutStartSec` 600→900, added `flatpak update`) are completely inert on non-nvidia images. Zero regression risk to non-nvidia users.
-
-> ⚠️ **NVIDIA post-merge testing requires an nvidia image variant.** The non-nvidia baseline only confirms the service is absent as expected. To verify the actual changes landed, use a bluefin-dx or other nvidia-enabled image — see the nvidia section below.
-
-**Post-merge verification checklist for PR #769** (must run on a **nvidia image build**, not baseline non-nvidia):
-
-```bash
-# 1. TimeoutStartSec bumped to 900
-systemctl cat ublue-nvidia-flatpak-runtime-sync.service | grep TimeoutStartSec
-# expected: TimeoutStartSec=900
-
-# 2. flatpak update step present in the sync script
-grep "flatpak update" /usr/libexec/ublue-nvidia-flatpak-runtime-sync
-# expected: at least one match
-
-# 3. Service not in failed state on first boot with nvidia
-systemctl --failed | grep nvidia
-# expected: no output
-```
-
 ### Worked example — PR #767 (flatpak appstream every-boot)
 
 **Baseline state** (bluefin:testing, 3 workflows, all Succeeded):

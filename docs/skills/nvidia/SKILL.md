@@ -1,7 +1,7 @@
 ---
 name: nvidia
-version: "1.2"
-last_updated: "2026-09-15"
+version: "1.4"
+last_updated: "2026-09-26"
 id: nvidia
 one_line_purpose: Maintain NVIDIA GPU support architecture and update procedures.
 entry_point: docs/skills/nvidia/SKILL.md
@@ -13,7 +13,7 @@ dependencies: []
 tags: [nvidia, gpu, drivers, akmods]
 description: >-
   NVIDIA GPU support architecture and update procedures. Use when editing
-  nvidia files in system_files/nvidia/, bluefin scripts, or dakota elements.
+  bluefin scripts, or dakota elements.
 metadata:
   type: reference
 ---
@@ -22,7 +22,6 @@ metadata:
 
 ## When to Use
 
-- Editing `system_files/nvidia/` in `projectbluefin/common`
 - Modifying nvidia build scripts in `bluefin`, `bluefin-lts`, or `dakota`
 - Updating NVIDIA driver or container toolkit versions
 - Debugging flatpak GPU access or CDI spec generation failures
@@ -39,7 +38,7 @@ metadata:
 
 | Repo | Base OS | Driver source | NCT installed | CDI preset |
 |---|---|---|---|---|
-| `projectbluefin/common` | shared overlay | — | — | ❌ none — see "`system_files/nvidia/` ships to nobody" below |
+| `projectbluefin/common` | shared overlay | — | — | ❌ none |
 | `projectbluefin/bluefin` | Fedora | `ublue-os/akmods-nvidia-open` OCI | ✅ (build script) | ❌ none in either repo |
 | `projectbluefin/bluefin-lts` | CentOS Stream 10 | `ublue-os/akmods-nvidia-open` OCI | ✅ (nvidia build overlay) | ✅ `system_files_overrides/nvidia/…/80-nvidia-container-toolkit.preset` |
 | `projectbluefin/dakota` | GNOME OS (BST) | `.run` installer, open kmod | ✅ (built from source) | ✅ `elements/bluefin-nvidia/nvidia-container-toolkit-preset.bst` |
@@ -47,22 +46,23 @@ metadata:
 **dakota is the reference implementation.** When in doubt about the correct approach for
 nvidia-related changes, read `elements/bluefin-nvidia/` in dakota first.
 
-### `system_files/nvidia/` ships to nobody
+### The suspend quirk lives in `shared/`
 
-The ctx stage of this repo's `Containerfile` publishes `/system_files/nvidia`, but **no
-consumer copies it**: in `projectbluefin/bluefin`, `projectbluefin/bluefin-lts` and
-`projectbluefin/utah`, every `COPY --from=common /system_files/...` line in the
-`Containerfile` names `/system_files/shared` or `/system_files/bluefin` — none names
-`/system_files/nvidia`. Verify with
-`grep -n 'COPY --from=common /system_files' Containerfile` in each repo rather than by line
-number; those line numbers drift.
-Nothing in the org enables `ublue-nvidia-flatpak-runtime-sync.service`, and this repo ships
-no preset for it. Editing `system_files/nvidia/` therefore changes no image today.
+`system_files/shared/usr/lib/modprobe.d/zz-nvidia-suspend.conf` pins
 
-`80-nvidia-container-toolkit.preset` has **never existed** in this repo
-(`git log --all -- system_files/nvidia/usr/lib/systemd/system-preset` is empty), so bluefin
-does not inherit a CDI preset from here either. Tracked in common#1124 — do not treat
-`system_files/nvidia/` as a live delivery path until that issue is resolved.
+- `NVreg_UseKernelSuspendNotifiers=1` — without notifiers (or the
+  `nvidia-suspend.service` procfs handshake), the driver vetoes system PM
+  (`nv_pmops_suspend` → `NV_ERR_NOT_SUPPORTED`), systemd-suspend aborts, and
+  the machine wakes seconds after sleep starts (common#803, same failure class
+  as dakota#1118).
+- `NVreg_TemporaryFilePath=/var/tmp` — the default `/tmp` is tmpfs; a failed
+  VRAM save there aborts suspend through the notifier path too.
+
+Both options are inert on systems without the nvidia module and ignored as
+unknown parameters by drivers that predate them. The `zz-` prefix keeps the
+file sorted after the driver packages' `nvidia.conf` so these assignments win
+duplicates. This repo ships no nvidia-only overlay (common#1124), so this quirk
+must stay in `shared/`.
 
 ---
 
@@ -97,10 +97,10 @@ Do **not** install `nvidia-container-runtime`, `libnvidia-container1`, `libnvidi
 
 ## Red Flags
 
+- Removing `system_files/shared/usr/lib/modprobe.d/zz-nvidia-suspend.conf` or either of its options — sleep regresses to the common#803 "wakes seconds after suspend" veto on images whose driver package does not pin them
 - Removing the `80-nvidia-container-toolkit.preset` CDI preset
 - Removing the `golang-github-nvidia-container-toolkit` exclusion from the bluefin build script
 - Installing `nvidia-container-runtime` or the full `nvidia-container-toolkit` package
-- `TimeoutStartSec` in `ublue-nvidia-flatpak-runtime-sync.service` drops below 900
 
 ---
 
@@ -108,12 +108,10 @@ Do **not** install `nvidia-container-runtime`, `libnvidia-container1`, `libnvidi
 
 Before closing any nvidia-related PR:
 
-- [ ] Changes to `system_files/nvidia/` tested to not break non-nvidia builds (shared layer affects all variants)
+- [ ] `zz-nvidia-suspend.conf` still carries `NVreg_UseKernelSuspendNotifiers=1` and `NVreg_TemporaryFilePath=/var/tmp` (common#803)
 - [ ] No `ublue-os/*` repos were written to
 - [ ] CDI preset not accidentally removed — `80-nvidia-container-toolkit.preset` still enables `nvidia-cdi-refresh.{path,service}`
-- [ ] If editing `ublue-nvidia-flatpak-runtime-sync`: both `check` and `sync` branches are consistent
 - [ ] `golang-github-nvidia-container-toolkit` exclusion in bluefin build script is still present
-- [ ] `TimeoutStartSec` in `ublue-nvidia-flatpak-runtime-sync.service` is >= 900
 - [ ] `just check` and `pre-commit run --all-files` pass clean
 
 ---

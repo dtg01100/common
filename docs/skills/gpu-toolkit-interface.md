@@ -1,7 +1,7 @@
 ---
 name: gpu-toolkit-interface
-version: "0.1"
-last_updated: "2026-08-08"
+version: "0.2"
+last_updated: "2026-09-26"
 id: gpu-toolkit-interface
 one_line_purpose: Define the shared GPU vendor toolkit interface that all GPU support implementations must satisfy.
 entry_point: docs/skills/gpu-toolkit-interface.md
@@ -102,10 +102,9 @@ reference implementations for this capability.
 | Non-blocking update | The service runs non-interactively and includes a generous timeout |
 | Idempotent | Safe to run on every boot even when the extension is already at the correct version |
 
-**NVIDIA implementation**:
-- `ublue-nvidia-flatpak-runtime-sync` script in `system_files/nvidia/usr/libexec/`
-- Installs `org.freedesktop.Platform.GL.nvidia-<version>` and runs `flatpak update --system --noninteractive`
-- `TimeoutStartSec=900` in the service unit
+**NVIDIA implementation**: none in projectbluefin today. The former
+`ublue-nvidia-flatpak-runtime-sync` overlay in `common` shipped to no image and
+was removed (common#1124).
 
 **AMD gap**: AMD GPU Flatpak GL extension (`org.freedesktop.Platform.GL.default` or Mesa-based) is typically handled by the base Mesa stack, but the service pattern must be evaluated for AMD DX12/VK extension variants.
 
@@ -117,7 +116,7 @@ reference implementations for this capability.
 | `check` exit contract | Exit 0 = action needed; exit non-zero = already done |
 | Idempotent `sync` | Safe to run more than once |
 
-**NVIDIA implementation**: `system_files/nvidia/usr/lib/systemd/system/ublue-nvidia-flatpak-runtime-sync.service` invokes `ublue-nvidia-flatpak-runtime-sync check` via `ExecCondition=` and `ublue-nvidia-flatpak-runtime-sync sync` via `ExecStart=`. See `docs/skills/oem-hardware-hooks/SKILL.md` for hook patterns.
+**NVIDIA implementation**: none in projectbluefin today (see section 4). See `docs/skills/oem-hardware-hooks/SKILL.md` for hook patterns.
 
 **AMD implementation target**: AMD-specific first-boot hook if any GPU-version-matched runtime sync is needed.
 
@@ -138,10 +137,6 @@ This is a known gap for all vendors. It is NOT a gating requirement for AMD merg
 system_files/
   shared/              # Vendor-neutral files (applies to all variants)
   bluefin/             # Bluefin-specific (non-GPU)
-  nvidia/              # NVIDIA vendor layer in common (flatpak runtime sync only)
-    usr/
-      lib/systemd/system/         # ublue-nvidia-flatpak-runtime-sync.service
-      libexec/                    # ublue-nvidia-flatpak-runtime-sync
   amd/                 # AMD vendor layer — CREATE THIS DIRECTORY when implementing
     usr/
       lib/systemd/system/         # amd flatpak sync service (if needed)
@@ -149,8 +144,7 @@ system_files/
       libexec/                    # amd-flatpak-runtime-sync (if needed)
 ```
 
-Note: the full NVIDIA reference implementation spans repos. `common`'s
-`system_files/nvidia/` carries only the Flatpak runtime sync; the CDI refresh
+Note: the full NVIDIA reference implementation spans repos. The CDI refresh
 units, `80-nvidia-container-toolkit.preset`, and NVIDIA kargs live in the
 downstream NVIDIA layers of `bluefin-lts` and `dakota`. AMD should follow the
 same split: vendor-neutral pieces in `common`, boot/CDI wiring downstream.
@@ -168,7 +162,7 @@ Use this checklist when reviewing any AMD GPU toolkit PR:
 - [ ] Rootless CDI config applied if required by the AMD runtime
 - [ ] Flatpak GL extension management evaluated and either implemented or documented as not required
 - [ ] First-boot hook pair if needed
-- [ ] `system_files/amd/README.md` documents the layer (mirrors `system_files/nvidia/README.md`)
+- [ ] `system_files/amd/README.md` documents the layer
 - [ ] CI build confirmed not to break non-AMD variants (the `amd/` layer must only apply to AMD image variants)
 - [ ] This skill file updated with the AMD implementation column
 

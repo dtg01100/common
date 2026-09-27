@@ -42,10 +42,10 @@ jobs:
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           echo "$(/home/linuxbrew/.linuxbrew/bin/brew --prefix)/bin" >> "$GITHUB_PATH"
           brew install bats-core fish zsh
-          pip install pytest pytest-cov pyyaml jsonschema
+          pip install pytest pytest-cov pyyaml jsonschema numpy
 
       - name: Install just
-        uses: taiki-e/install-action@1a85bbbe6e8628d43d225ac830981df21a8567d2 # just
+        uses: taiki-e/install-action@b6a061addd82b81aaeca51bdf2c53cd707996e5a # just
         with:
           tool: just
 
@@ -78,6 +78,9 @@ jobs:
             tests/test_check_oci_refs.py \
             tests/test_skill_docs.py \
             -v
+
+      - name: Run pytest (Hidamari movie generator)
+        run: python3 -m pytest tests/test_render_hidamari_movie.py -v
 
       - name: Upload coverage report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -193,9 +196,6 @@ jobs:
 
       - name: Run bats (libvirt helper)
         run: bats tests/test_libvirt_helper.bats
-
-      - name: Run bats (nvidia flatpak sync)
-        run: bats tests/test_nvidia_flatpak_sync.bats
 
       - name: Run bats (shared.just)
         run: bats tests/test_shared_just.bats
