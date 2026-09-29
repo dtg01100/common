@@ -150,13 +150,15 @@ not) buys nothing here.
 with `just --list`. The escaped
 spelling `{{{{.` stays legal — a suite test pins that, so the gate cannot drift into
 banning `just`'s own escape. Gate 1 matches the placeholder shapes directly, so it
-costs nothing in CI; gate 3 (`just --list`) is the backstop for anything the pattern
-misses and `skip`s when `just` is not installed. The suite is registered in
-`Justfile:28` (`just test`); the matching `Run bats (justfile brace syntax gate)` step
-in `.github/workflows/unit-tests.yml` is still to land — that workflow names each bats
-file explicitly and never calls `just test`, so until the step lands the gate only runs
-locally. `just check`'s existing `just --fmt --check` already covers the "parses as
-written" half, and the bats suite is what names the failure mode.
+costs nothing in CI; it is deliberately not exhaustive — `{{- .X }}`, `{{$x}}` and
+`{{ end }}` also abort the parse and are left to gate 3, which is why the header
+comment says so. Gate 3 (`just --list`) is the backstop for anything the pattern
+misses and `skip`s when `just` is not installed. The suite is registered in the
+`test:` recipe (`just test`); the matching `Run bats (justfile brace syntax gate)`
+step in `.github/workflows/unit-tests.yml` is still to land — that workflow names
+each bats file explicitly and never calls `just test`, so until the step lands the
+gate only runs locally. `just check`'s existing `just --fmt --check` already covers
+the "parses as written" half, and the bats suite is what names the failure mode.
 
 One trap when reproducing a reported column number: `just` points at the offending
 token in the file **as it parses**, so if a consumer downstream collapses braces

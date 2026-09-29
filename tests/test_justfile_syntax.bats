@@ -35,7 +35,13 @@ setup() {
     # discovered paths must be readable no matter what the caller's cwd is.
     REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
     JUSTFILES="$(cd "${REPO_ROOT}" && find system_files bluefin-branding -name '*.just' -type f 2>/dev/null | sed "s|^|${REPO_ROOT}/|" | sort)"
-    export REPO_ROOT JUSTFILES
+    # The gate patterns live here, once, and are referenced by both the gate and
+    # the pin test below. A second copy in the test would let someone loosen the
+    # gate while the test kept passing against its own copy, which is the same
+    # class of vacuous check this suite exists to catch.
+    PLACEHOLDER_RE='(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
+    CLOSE_BRACE_RE='\}\}\}\}'
+    export REPO_ROOT JUSTFILES PLACEHOLDER_RE CLOSE_BRACE_RE
 }
 
 have_just() {
@@ -85,7 +91,14 @@ assert_no_justfile_matches() {
     # by `{`, so it does not match. That spelling is legal (it de-escapes to
     # `{{.Repository}}`) and is what the escape test below asserts. Only the
     # bare, unescaped form is banned here.
-    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
+    #
+    # NOT exhaustive, by design and by cost: `{{- .X }}` (a trim marker), `{{$x}}`
+    # and `{{ end }}` also abort the `just` parse and do not match this pattern.
+    # Gate 3 (`just --list`) is what catches those, and `just check`'s
+    # `--fmt --check` in validate.yml covers the same ground in CI. Do not read
+    # this regex as the definition of a valid justfile — it names the two
+    # shapes seen in the wild.
+    run assert_no_justfile_matches "${PLACEHOLDER_RE}"
     [ "${status}" -eq 0 ]
 }
 
@@ -94,7 +107,7 @@ assert_no_justfile_matches() {
     # anything: `}}` outside an interpolation is already literal, so the doubled
     # form reaches the shell verbatim and the recipe prints stray braces after
     # every column. That was the live bug in `clean-system` on main.
-    run assert_no_justfile_matches '\}\}\}\}'
+    run assert_no_justfile_matches "${CLOSE_BRACE_RE}"
     [ "${status}" -eq 0 ]
 }
 
@@ -107,10 +120,10 @@ assert_no_justfile_matches() {
     printf 'probe:\n    echo "{{.Repository}}}}"\n' > "${planted}"
     local saved="${JUSTFILES}"
     JUSTFILES="${planted}"
-    run assert_no_justfile_matches '\}\}\}\}'
+    run assert_no_justfile_matches "${CLOSE_BRACE_RE}"
     [ "${status}" -ne 0 ]
     JUSTFILES="${saved}"
-    run assert_no_justfile_matches '\}\}\}\}'
+    run assert_no_justfile_matches "${CLOSE_BRACE_RE}"
     [ "${status}" -eq 0 ]
 }
 
@@ -124,30 +137,30 @@ assert_no_justfile_matches() {
 
     printf 'probe:\n    echo "{{.Repository}}"\n' > "${dir}/bare.just"
     JUSTFILES="${dir}/bare.just"
-    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
+    run assert_no_justfile_matches "${PLACEHOLDER_RE}"
     [ "${status}" -ne 0 ]
 
     # Spaced and piped spellings abort the parse just the same and must be
     # caught by the same gate.
     printf 'probe:\n    echo "{{ .Repository }}"\n' > "${dir}/spaced.just"
     JUSTFILES="${dir}/spaced.just"
-    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
+    run assert_no_justfile_matches "${PLACEHOLDER_RE}"
     [ "${status}" -ne 0 ]
 
     printf 'probe:\n    echo "{{json .}}"\n' > "${dir}/piped.just"
     JUSTFILES="${dir}/piped.just"
-    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
+    run assert_no_justfile_matches "${PLACEHOLDER_RE}"
     [ "${status}" -ne 0 ]
 
     # Legal just interpolations must not trip it.
     printf 'probe arg:\n    echo "{{ arg }} {{ source_directory() }}"\n' > "${dir}/legal.just"
     JUSTFILES="${dir}/legal.just"
-    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
+    run assert_no_justfile_matches "${PLACEHOLDER_RE}"
     [ "${status}" -eq 0 ]
 
     printf 'probe:\n    echo "{{{{.Repository}}"\n' > "${dir}/escaped.just"
     JUSTFILES="${dir}/escaped.just"
-    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
+    run assert_no_justfile_matches "${PLACEHOLDER_RE}"
     [ "${status}" -eq 0 ]
 
     JUSTFILES="${saved}"
