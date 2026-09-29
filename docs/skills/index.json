@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-26",
+  "generated_at": "2026-09-29",
   "schema_version": "1.0",
   "skills": [
     {
@@ -206,7 +206,7 @@
       ],
       "description": "Pre/post-merge E2E CI for common. Use when debugging E2E failures, understanding the PR gate flow, or diagnosing masked brew-setup issues.",
       "version": "1.1",
-      "last_updated": "2026-08-08",
+      "last_updated": "2026-09-29",
       "doc_type": "reference"
     },
     {

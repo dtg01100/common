@@ -25,6 +25,7 @@ test:
     bats tests/test_motd_integration.bats
     bats tests/test_clean_system_podman_path.bats
     bats tests/test_default_just.bats
+    bats tests/test_justfile_syntax.bats
     bats tests/test_ublue_image_info.bats
     bats tests/test_profile_d.bats
     bats tests/test_uwelcome_profile.bats

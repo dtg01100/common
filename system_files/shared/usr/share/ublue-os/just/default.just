@@ -28,9 +28,16 @@ bios-info:
 
 clean-system:
     #!/usr/bin/bash
+    # NOTE: never put a podman/docker `--format` Go template in a just recipe.
+    # Go templates need doubled-brace placeholders; `just` lexes the recipe body
+    # and aborts the WHOLE file on them with "unknown start of token '.'", which
+    # silently takes every other recipe in this justfile down with it -- it even
+    # fires on a comment. The default `image ls` table already shows repository,
+    # tag, image ID and size, so the prune preview needs no custom format.
+    # tests/test_justfile_syntax.bats enforces this.
     if gum confirm "Prune all Podman images and volumes?"; then
         echo "Images that would be pruned:"
-        /usr/bin/podman image ls --filter dangling=true --format "{{{{.Repository}}}}:{{{{.Tag}}}}  {{{{.ID}}}}" 2>/dev/null | head -20
+        /usr/bin/podman image ls --filter dangling=true 2>/dev/null | head -20
         echo "Volumes that would be pruned:"
         /usr/bin/podman volume ls --filter dangling=true --quiet 2>/dev/null | head -20
         if gum confirm "Proceed with pruning Podman images and volumes?"; then
@@ -42,7 +49,7 @@ clean-system:
     if command -v docker >/dev/null 2>&1; then
       if gum confirm "Prune all Docker images and volumes?"; then
         echo "Images that would be pruned:"
-        docker image ls --filter dangling=true --format "{{{{.Repository}}}}:{{{{.Tag}}}}  {{{{.ID}}}}" 2>/dev/null | head -20
+        docker image ls --filter dangling=true 2>/dev/null | head -20
         echo "Volumes that would be pruned:"
         docker volume ls --filter dangling=true --quiet 2>/dev/null | head -20
         if gum confirm "Proceed with pruning Docker images and volumes?"; then
