@@ -91,7 +91,9 @@ FORKS = {
 
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 REPO_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-SIMPLE_REF = re.compile(r"^[ \t]*ref:[ \t]*(?P<value>\S+)[ \t]*$", re.MULTILINE)
+REF_LINE = re.compile(r"^[ \t]*ref:[ \t]*(?P<rest>[^\n]*)$", re.MULTILINE)
+QUOTED_REF = re.compile(r"^(?P<quote>[\"'])(?P<value>[^\"']*)(?P=quote)[ \t]*(?:#.*)?$")
+BARE_REF = re.compile(r"^(?P<value>[^\s\"'#]+)(?:[ \t]+#.*)?$")
 FSDK_REF = re.compile(
     r"^freedesktop-sdk-(?P<version>\S+?)-(?P<count>\d+)-g(?P<ref>[0-9a-f]{40})$"
 )
@@ -111,6 +113,27 @@ def read_text(path: Path, describes: str) -> str:
         raise Failure(f"cannot read {path}: {error}") from None
 
 
+def ref_lines(text: str) -> list[tuple[str, str | None]]:
+    """Every ``ref:`` line of a BuildStream element, paired with its value.
+
+    A ref line may carry a trailing YAML comment and may quote its value, so
+    ``ref: "<sha>"  # pinned by hand`` states the same ref as ``ref: <sha>``.
+    A line whose value cannot be read that way is returned with ``None`` so the
+    caller reports it as unparseable rather than as a missing ref.
+    """
+    lines: list[tuple[str, str | None]] = []
+    for match in REF_LINE.finditer(text):
+        rest = match.group("rest").rstrip()
+        value = None
+        for pattern in (QUOTED_REF, BARE_REF):
+            found = pattern.match(rest)
+            if found:
+                value = found.group("value") or None
+                break
+        lines.append((match.group(0).strip(), value))
+    return lines
+
+
 def junction_ref(tree: Path) -> str:
     """The commit the fsdk-containers junction is pinned to.
 
@@ -120,7 +143,13 @@ def junction_ref(tree: Path) -> str:
     the base neither immutable nor comparable.
     """
     text = read_text(tree / JUNCTION, f"the {JUNCTION} pin")
-    refs = [match.group("value") for match in SIMPLE_REF.finditer(text)]
+    lines = ref_lines(text)
+    unparseable = [raw for raw, value in lines if value is None]
+    if unparseable:
+        raise Failure(
+            f"{JUNCTION} has a ref line this check cannot read: '{unparseable[0]}'"
+        )
+    refs = [value for _, value in lines]
     if not refs:
         raise Failure(f"{JUNCTION} pins no source ref, so the base is not immutable")
     if len(set(refs)) > 1:
@@ -174,8 +203,10 @@ def fsdk_pin(commit: str, remote: str) -> tuple[str, str]:
                 f"{commit[:12]} at {remote}: {str(detail).strip()}"
             ) from None
     match = None
-    for candidate in SIMPLE_REF.finditer(junction):
-        found = FSDK_REF.match(candidate.group("value"))
+    for _, value in ref_lines(junction):
+        if value is None:
+            continue
+        found = FSDK_REF.match(value)
         if found:
             match = found
             break

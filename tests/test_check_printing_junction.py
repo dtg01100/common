@@ -169,6 +169,32 @@ class TestJunctionRef:
         with pytest.raises(Failure, match="pins no source ref"):
             junction_ref(tree)
 
+    def test_reads_a_ref_with_a_trailing_comment(self, fork):
+        tree, _ = fork
+        commit = junction_ref(tree)
+        (tree / "elements/fsdk-containers.bst").write_text(
+            f"kind: junction\nsources:\n  - kind: git_repo\n    ref: {commit}  # pinned\n"
+        )
+        assert junction_ref(tree) == commit
+
+    @pytest.mark.parametrize("quote", ['"', "'"])
+    def test_reads_a_quoted_ref(self, fork, quote):
+        tree, _ = fork
+        commit = junction_ref(tree)
+        (tree / "elements/fsdk-containers.bst").write_text(
+            "kind: junction\nsources:\n  - kind: git_repo\n"
+            f"    ref: {quote}{commit}{quote}  # pinned\n"
+        )
+        assert junction_ref(tree) == commit
+
+    def test_reports_an_unparseable_ref_line(self, fork):
+        tree, _ = fork
+        (tree / "elements/fsdk-containers.bst").write_text(
+            "kind: junction\nsources:\n  - kind: git_repo\n    ref: 'unterminated\n"
+        )
+        with pytest.raises(Failure, match="cannot read"):
+            junction_ref(tree)
+
 
 # ---------------------------------------------------------------------------
 # oci_labels
