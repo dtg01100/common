@@ -38,7 +38,7 @@ repository's local catalog with `docs/skills/hive.md` as the preflight guard.
 | Onboard a new repo into the factory | [`factory-onboarding.md`](skills/factory-onboarding.md) |
 | Change a GNOME setting or dconf key | [`dconf-consistency.md`](skills/dconf-consistency.md) |
 | Work on Bazaar config or hooks | [`bazaar.md`](skills/bazaar.md) |
-| Edit `system_files/shared/`, `bluefin/`, or `nvidia/` | [`submodule-boundary.md`](skills/submodule-boundary.md) |
+| Edit `system_files/shared/` or `bluefin/` | [`submodule-boundary.md`](skills/submodule-boundary.md) |
 | Touch any image reference or registry path | [`image-registry.md`](skills/image-registry.md) |
 | Add an image variant or write `image-info.json` | [`image-identity.md`](skills/image-identity.md) |
 | Modify the `Containerfile` or add a binary | [`containerfile/SKILL.md`](skills/containerfile/SKILL.md) |
@@ -60,6 +60,7 @@ repository's local catalog with `docs/skills/hive.md` as the preflight guard.
 | Track PAPPL scanning API status or scanner ownership boundary | [`pappl-scanning-boundary.md`](skills/pappl-scanning-boundary.md) |
 | Work with OEM first-boot hooks | [`oem-hardware-hooks/SKILL.md`](skills/oem-hardware-hooks/SKILL.md) |
 | Understand MIME defaults | [`mime-defaults.md`](skills/mime-defaults.md) |
+| Regenerate the Hidamari video-wallpaper asset | [`hidamari-wallpaper.md`](skills/hidamari-wallpaper.md) |
 | Understand why skill-drift was retired | [`skill-drift.md`](skills/skill-drift.md) |
 | Decide whether / how to update a skill | [`skill-improvement.md`](skills/skill-improvement.md) |
 | Author a new skill | [`write-a-skill.md`](skills/write-a-skill.md) |

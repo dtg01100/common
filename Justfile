@@ -5,7 +5,7 @@ just := just_executable()
 # reason; tests/test_suite_registration.bats enforces that.
 # Run unit tests (pytest for hooks.py, bats for shell scripts)
 test:
-    python3 -m pytest tests/test_hooks.py tests/test_check_oci_refs.py tests/test_curated_config.py tests/test_skill_docs.py tests/test_chairlift_config.py tests/test_renovate_config.py tests/test_ffmpeg_thumbnailer.py -v --cov=tests --cov-report=term-missing
+    python3 -m pytest tests/test_hooks.py tests/test_check_oci_refs.py tests/test_curated_config.py tests/test_skill_docs.py tests/test_chairlift_config.py tests/test_renovate_config.py tests/test_render_hidamari_movie.py tests/test_ffmpeg_thumbnailer.py -v --cov=tests --cov-report=term-missing
     bats tests/test_libsetup.bats
     bats tests/test_setup_scripts.bats
     bats tests/test_privileged_setup.bats
@@ -39,7 +39,6 @@ test:
     bats tests/test_theming_hook.bats
     bats tests/test_dynamic_wallpaper_hook.bats
     bats tests/test_damask_setup.bats
-    bats tests/test_nvidia_flatpak_sync.bats
     bats tests/test_system_just.bats
     bats tests/test_brew_tap_trust.bats
     bats tests/test_apps_just.bats
