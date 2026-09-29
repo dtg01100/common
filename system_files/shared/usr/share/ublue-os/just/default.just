@@ -28,9 +28,11 @@ bios-info:
 
 clean-system:
     #!/usr/bin/bash
-    # No `--format` here on purpose: a Go-template placeholder is not a valid
-    # `just` token and aborts the parse of this whole file, and `just` has no
-    # escape for a close brace. Rationale + gate: tests/test_justfile_syntax.bats
+    # No `--format` here on purpose: a bare Go-template placeholder is not a
+    # valid `just` token and aborts the parse of this whole file. It can be
+    # written as `{{{{.Repository}}` (just's literal-brace escape), but the
+    # default `podman image ls` table already carries the same columns, so the
+    # placeholder buys nothing. Rationale + gate: tests/test_justfile_syntax.bats
     # and docs/skills/e2e-ci/SKILL.md.
     if gum confirm "Prune all Podman images and volumes?"; then
         echo "Images that would be pruned:"

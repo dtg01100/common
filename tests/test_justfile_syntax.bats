@@ -16,7 +16,9 @@
 #           so `}}}}` reaches the shell as two stray braces.
 #
 # So the three gates are:
-#   1. no `*.just` file contains a Go-template placeholder shape
+#   1. no `*.just` file contains an UNESCAPED Go-template placeholder (`{{.`).
+#      The escaped spelling `{{{{.` is legal and deliberately allowed — see the
+#      "{{{{ literal-brace escape is accepted" test below.
 #   2. no `*.just` file contains `}}}}`
 #   3. every `*.just` file actually parses with `just --list`
 #
@@ -67,12 +69,18 @@ assert_no_justfile_matches() {
     [ "${status}" -eq 0 ]
 }
 
-@test "justfile gate: no justfile contains a Go-template brace placeholder" {
-    # A Go template placeholder is `{{` followed immediately by `.` (possibly via
-    # just's `{{{{` literal-brace escape), which is what `just` refuses to lex.
-    # Matching on the dot rather than on `[A-Za-z_]` keeps legal just
-    # interpolations (`{{ args }}`, `{{ source_directory() }}`) out of the net.
-    run assert_no_justfile_matches '\{\{(\{\{)?\.'
+@test "justfile gate: no justfile contains an unescaped Go-template brace placeholder" {
+    # A Go template placeholder is `{{` followed immediately by `.`, which is
+    # what `just` refuses to lex. Matching on the dot rather than on
+    # `[A-Za-z_]` keeps legal just interpolations (`{{ args }}`,
+    # `{{ source_directory() }}`) out of the net.
+    #
+    # The leading `(^|[^{])` is what keeps just's own `{{{{` literal-brace
+    # escape out of the net too: in `{{{{.Repository}}` the `{{.` is preceded
+    # by `{`, so it does not match. That spelling is legal (it de-escapes to
+    # `{{.Repository}}`) and is what the escape test below asserts. Only the
+    # bare, unescaped form is banned here.
+    run assert_no_justfile_matches '(^|[^{])\{\{\.'
     [ "${status}" -eq 0 ]
 }
 
@@ -99,6 +107,27 @@ assert_no_justfile_matches() {
     JUSTFILES="${saved}"
     run assert_no_justfile_matches '\}\}\}\}'
     [ "${status}" -eq 0 ]
+}
+
+@test "justfile gate: the placeholder gate bans the bare form and allows the escape" {
+    # Pins the asymmetry the gate is built on, so neither half can drift:
+    # `{{.Repository}}` is the spelling that breaks the parse and must fail;
+    # `{{{{.Repository}}` is just's documented escape and must pass.
+    local dir="${BATS_TEST_TMPDIR}/pattern"
+    mkdir -p "${dir}"
+    local saved="${JUSTFILES}"
+
+    printf 'probe:\n    echo "{{.Repository}}"\n' > "${dir}/bare.just"
+    JUSTFILES="${dir}/bare.just"
+    run assert_no_justfile_matches '(^|[^{])\{\{\.'
+    [ "${status}" -ne 0 ]
+
+    printf 'probe:\n    echo "{{{{.Repository}}"\n' > "${dir}/escaped.just"
+    JUSTFILES="${dir}/escaped.just"
+    run assert_no_justfile_matches '(^|[^{])\{\{\.'
+    [ "${status}" -eq 0 ]
+
+    JUSTFILES="${saved}"
 }
 
 @test "justfile gate: just's own {{{{ literal-brace escape is accepted" {
