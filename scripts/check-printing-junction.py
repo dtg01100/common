@@ -64,7 +64,6 @@ a scratch repository) and ``--no-fetch`` skips it, leaving only checks 1 and 3.
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import json
 import re
 import shutil
@@ -214,6 +213,49 @@ def renovate_file_patterns(config: dict) -> list[tuple[str, str]]:
     return patterns
 
 
+def glob_matches_junction(pattern: str) -> bool:
+    """Whether a minimatch glob can match ``elements/fsdk-containers.bst``.
+
+    Renovate matches ``managerFilePatterns`` globs with minimatch, where ``*``
+    and ``?`` stop at a path separator and only ``**`` crosses one. Python's
+    :func:`fnmatch.fnmatch` lets ``*`` cross ``/``, so a pattern such as
+    ``*.bst`` — which minimatch reads as "a ``.bst`` file at the repository
+    root" — would otherwise be read as a manager of the junction and reported
+    as a second writer that is not there.
+    """
+    regex = ""
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "*":
+            if pattern[index : index + 2] == "**":
+                index += 2
+                if pattern[index : index + 1] == "/":
+                    index += 1
+                    regex += "(?:.*/)?"
+                else:
+                    regex += ".*"
+                continue
+            regex += "[^/]*"
+        elif char == "?":
+            regex += "[^/]"
+        elif char == "[":
+            close = pattern.find("]", index + 1)
+            if close == -1:
+                regex += re.escape(char)
+            else:
+                body = pattern[index + 1 : close]
+                if body.startswith(("!", "^")):
+                    body = "^" + body[1:]
+                regex += "[" + body + "]"
+                index = close + 1
+                continue
+        else:
+            regex += re.escape(char)
+        index += 1
+    return re.fullmatch(regex, JUNCTION) is not None
+
+
 def pattern_matches_junction(pattern: str, regex: bool = False) -> bool:
     """Whether a Renovate file pattern can match ``elements/fsdk-containers.bst``.
 
@@ -231,7 +273,7 @@ def pattern_matches_junction(pattern: str, regex: bool = False) -> bool:
     else:
         expression = None
     if expression is None:
-        return fnmatch.fnmatch(JUNCTION, pattern.lstrip("/"))
+        return glob_matches_junction(pattern.lstrip("/"))
     try:
         return re.search(expression, JUNCTION) is not None
     except re.error:

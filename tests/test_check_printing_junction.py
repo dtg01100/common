@@ -296,7 +296,24 @@ class TestRenovate:
         }
         assert renovate_manages_junction(config) is True
 
-    def test_an_unparseable_pattern_fails_closed(self):
+    def test_a_root_level_glob_does_not_reach_into_a_directory(self):
+        # minimatch stops ``*`` at a separator, so ``*.bst`` is a root-level
+        # pattern and never the junction, which lives under ``elements/``.
+        config = {"customManagers": [{"customType": "regex", "managerFilePatterns": ["*.bst"]}]}
+        assert renovate_manages_junction(config) is False
+
+    def test_a_double_star_glob_crosses_directories(self):
+        config = {"customManagers": [{"customType": "regex", "managerFilePatterns": ["**/*.bst"]}]}
+        assert renovate_manages_junction(config) is True
+
+    def test_a_question_mark_glob_does_not_match_a_separator(self):
+        config = {
+            "customManagers": [
+                {"customType": "regex", "managerFilePatterns": ["elements?fsdk-containers.bst"]}
+            ]
+        }
+        assert renovate_manages_junction(config) is False
+
         config = {"customManagers": [{"customType": "regex", "managerFilePatterns": ["/[unclosed/"]}]}
         with pytest.raises(Failure, match="is not a regex"):
             renovate_manages_junction(config)
