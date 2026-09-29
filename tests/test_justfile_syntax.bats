@@ -21,7 +21,9 @@
 #   3. every `*.just` file actually parses with `just --list`
 #
 # Gate 3 is the backstop: it fails on any other way of breaking a justfile, not
-# just the brace shapes above. Gate 1 and 2 name the failure mode.
+# just the brace shapes above. Gate 1 and 2 name the failure mode; both walk the
+# discovered file list one file at a time and treat a grep *error* as a failure,
+# so a missing file can never read as "no match".
 #
 # Run: bats tests/test_justfile_syntax.bats
 
@@ -33,6 +35,29 @@ setup() {
 
 have_just() {
     command -v just >/dev/null 2>&1
+}
+
+# Assert no file in ${JUSTFILES} matches the given grep pattern.
+#
+# ${JUSTFILES} is a newline-joined list, so it must be walked one file at a
+# time: quoting it hands `grep` a single (nonexistent) filename, which exits 2
+# ("No such file or directory") and reads as "clean" under a `-ne 0` check.
+# A grep *error* is a failure here, never a pass, and no match must be exactly
+# status 1.
+assert_no_justfile_matches() {
+    local pattern="$1" f status found=1
+    while IFS= read -r f; do
+        [ -n "${f}" ] || continue
+        [ -r "${f}" ] || { printf 'UNREADABLE %s\n' "${f}" >&2; return 1; }
+        grep -Eq "${pattern}" "${f}"
+        status=$?
+        case "${status}" in
+            0) printf 'MATCH %s (%s)\n' "${f}" "${pattern}" >&2; found=0 ;;
+            1) : ;;
+            *) printf 'GREP ERROR %s (%s) status=%s\n' "${f}" "${pattern}" "${status}" >&2; return 1 ;;
+        esac
+    done <<< "${JUSTFILES}"
+    [ "${found}" -eq 1 ]
 }
 
 @test "justfile gate: test fixtures were discovered" {
@@ -47,8 +72,8 @@ have_just() {
     # just's `{{{{` literal-brace escape), which is what `just` refuses to lex.
     # Matching on the dot rather than on `[A-Za-z_]` keeps legal just
     # interpolations (`{{ args }}`, `{{ source_directory() }}`) out of the net.
-    run grep -RnE '\{\{(\{\{)?\.' "${JUSTFILES}"
-    [ "${status}" -ne 0 ]
+    run assert_no_justfile_matches '\{\{(\{\{)?\.'
+    [ "${status}" -eq 0 ]
 }
 
 @test "justfile gate: no justfile contains the non-existent }}}} escape" {
@@ -56,8 +81,24 @@ have_just() {
     # anything: `}}` outside an interpolation is already literal, so the doubled
     # form reaches the shell verbatim and the recipe prints stray braces after
     # every column. That was the live bug in `clean-system` on main.
-    run grep -Rn '}}}}' "${JUSTFILES}"
+    run assert_no_justfile_matches '\}\}\}\}'
+    [ "${status}" -eq 0 ]
+}
+
+@test "justfile gate: the no-match helper is not vacuous" {
+    # Negative control. If the grep walk ever regresses to passing the file list
+    # as one quoted filename (grep exits 2, reads as clean), the two gates above
+    # pass no matter what is in a justfile. Plant a violation in a throwaway
+    # list and require the helper to catch it.
+    local planted="${BATS_TEST_TMPDIR}/planted.just"
+    printf 'probe:\n    echo "{{.Repository}}}}"\n' > "${planted}"
+    local saved="${JUSTFILES}"
+    JUSTFILES="${planted}"
+    run assert_no_justfile_matches '\}\}\}\}'
     [ "${status}" -ne 0 ]
+    JUSTFILES="${saved}"
+    run assert_no_justfile_matches '\}\}\}\}'
+    [ "${status}" -eq 0 ]
 }
 
 @test "justfile gate: just's own {{{{ literal-brace escape is accepted" {

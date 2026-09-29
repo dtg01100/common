@@ -28,17 +28,10 @@ bios-info:
 
 clean-system:
     #!/usr/bin/bash
-    # NOTE: this recipe deliberately has no `--format` Go template.
-    # `just` lexes the recipe body, and a bare Go-template placeholder is not a
-    # valid token -- it aborts the parse of the WHOLE file with "unknown start
-    # of token '.'", taking every unrelated recipe in this justfile down with it
-    # (it fires on comments too, this one included).
-    # `just` escapes a literal open brace by doubling it; it has NO escape for a
-    # close brace, so the format string this recipe used to carry printed a
-    # stray pair of closing braces after every column.
-    # The default `image ls` table already shows repository, tag, image ID and
-    # size, so no format is needed. tests/test_justfile_syntax.bats enforces
-    # both rules.
+    # No `--format` here on purpose: a Go-template placeholder is not a valid
+    # `just` token and aborts the parse of this whole file, and `just` has no
+    # escape for a close brace. Rationale + gate: tests/test_justfile_syntax.bats
+    # and docs/skills/e2e-ci/SKILL.md.
     if gum confirm "Prune all Podman images and volumes?"; then
         echo "Images that would be pruned:"
         /usr/bin/podman image ls --filter dangling=true 2>/dev/null | head -20
