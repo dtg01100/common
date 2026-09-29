@@ -28,13 +28,17 @@ bios-info:
 
 clean-system:
     #!/usr/bin/bash
-    # NOTE: never put a podman/docker `--format` Go template in a just recipe.
-    # Go templates need doubled-brace placeholders; `just` lexes the recipe body
-    # and aborts the WHOLE file on them with "unknown start of token '.'", which
-    # silently takes every other recipe in this justfile down with it -- it even
-    # fires on a comment. The default `image ls` table already shows repository,
-    # tag, image ID and size, so the prune preview needs no custom format.
-    # tests/test_justfile_syntax.bats enforces this.
+    # NOTE: this recipe deliberately has no `--format` Go template.
+    # `just` lexes the recipe body, and a bare Go-template placeholder is not a
+    # valid token -- it aborts the parse of the WHOLE file with "unknown start
+    # of token '.'", taking every unrelated recipe in this justfile down with it
+    # (it fires on comments too, this one included).
+    # `just` escapes a literal open brace by doubling it; it has NO escape for a
+    # close brace, so the format string this recipe used to carry printed a
+    # stray pair of closing braces after every column.
+    # The default `image ls` table already shows repository, tag, image ID and
+    # size, so no format is needed. tests/test_justfile_syntax.bats enforces
+    # both rules.
     if gum confirm "Prune all Podman images and volumes?"; then
         echo "Images that would be pruned:"
         /usr/bin/podman image ls --filter dangling=true 2>/dev/null | head -20

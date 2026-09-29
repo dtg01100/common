@@ -1,25 +1,27 @@
 #!/usr/bin/env bats
 # Justfile syntax gate.
 #
-# `just` lexes a recipe body before handing it to the shell, and a Go-template
+# `just` lexes a recipe body before handing it to the shell, and a bare Go-template
 # placeholder such as podman's `--format "{{.Repository}}"` is not a valid token.
 # A single one aborts the parse of the WHOLE file with
 #
 #     error: unknown start of token '.'
 #     --> default.just:33:60
 #
-# which takes down every unrelated recipe in the same justfile. That is exactly
-# how the 2026-09-29 Promotion Candidate E2E failed: `default.just` could not be
-# parsed on bluefin:lts-testing, so `ujust bios-info`, `ujust logs-this-boot`,
-# `ujust check-local-overrides` and the shared-scripts scenario all exited 1.
+# which takes down every unrelated recipe in the same justfile.
 #
-# Two gates, because the two failure modes are different:
-#   1. no `*.just` file may contain an adjacent-brace placeholder at all
-#   2. every `*.just` file must actually parse with `just --list`
+# `just`'s escaping is asymmetric, which is the whole point of these gates:
+#   `{{{{`  is the escape for a literal `{{`  -> de-escaped by just. Legal.
+#   `}}}}`  is NOT an escape. Outside an interpolation `}}` is already literal,
+#           so `}}}}` reaches the shell as two stray braces.
 #
-# Gate 1 is the one that catches a regression at authoring time. Gate 2 is the
-# backstop: it fails on any other way of breaking a justfile, and it also proves
-# the fix by running against the exact bytes the image ships.
+# So the three gates are:
+#   1. no `*.just` file contains a Go-template placeholder shape
+#   2. no `*.just` file contains `}}}}`
+#   3. every `*.just` file actually parses with `just --list`
+#
+# Gate 3 is the backstop: it fails on any other way of breaking a justfile, not
+# just the brace shapes above. Gate 1 and 2 name the failure mode.
 #
 # Run: bats tests/test_justfile_syntax.bats
 
@@ -41,20 +43,37 @@ have_just() {
 }
 
 @test "justfile gate: no justfile contains a Go-template brace placeholder" {
-    # `{{` is what just refuses to lex. Recipe-level interpolations
-    # (`{{ justfile() }}`, `{{ args }}`, `{{ ACTION }}`) are spelled with a
-    # space and are legal, so match a brace immediately followed by `.`, a
-    # letter, `_` or `/` — the shape a Go template placeholder always has.
-    run grep -RnE '\{\{[./A-Za-z_]' $(cat <<< "${JUSTFILES}" | grep -v '^#')
+    # A Go template placeholder is `{{` followed immediately by `.` (possibly via
+    # just's `{{{{` literal-brace escape), which is what `just` refuses to lex.
+    # Matching on the dot rather than on `[A-Za-z_]` keeps legal just
+    # interpolations (`{{ args }}`, `{{ source_directory() }}`) out of the net.
+    run grep -RnE '\{\{(\{\{)?\.' "${JUSTFILES}"
     [ "${status}" -ne 0 ]
 }
 
-@test "justfile gate: no justfile ships doubled-brace template escaping" {
-    # `{{{{` / `}}}}` is leftover escaping for a Jinja-style consumer that no
-    # longer exists. It is harmless to `just` itself but misleading, and it is
-    # the shape that turns into a hard parse error the moment any consumer
-    # de-escapes it. See a917e93 and 434daa4.
-    run grep -Rn '{{{{' $(cat <<< "${JUSTFILES}" | grep -v '^#')
+@test "justfile gate: no justfile contains the non-existent }}}} escape" {
+    # `{{{{` IS just's escape for a literal `{{`. `}}}}` is not an escape for
+    # anything: `}}` outside an interpolation is already literal, so the doubled
+    # form reaches the shell verbatim and the recipe prints stray braces after
+    # every column. That was the live bug in `clean-system` on main.
+    run grep -Rn '}}}}' "${JUSTFILES}"
+    [ "${status}" -ne 0 ]
+}
+
+@test "justfile gate: just's own {{{{ literal-brace escape is accepted" {
+    # Guards against this suite growing a rule that forbids the legitimate
+    # escape. If a future justfile legitimately needs a literal `{{`, this test
+    # fails so the rule is revisited rather than silently tightened.
+    if ! have_just; then
+        skip "just is not installed in this environment"
+    fi
+    local out
+    printf 'probe:\n    echo "{{{{.Repository}}:{{{{.Tag}}  {{{{.ID}}"\n' > "${BATS_TEST_TMPDIR}/probe.just"
+    out="$(just --justfile "${BATS_TEST_TMPDIR}/probe.just" --dry-run probe 2>&1)"
+    # Correct spelling de-escapes to a clean podman format string ...
+    grep -Fq 'echo "{{.Repository}}:{{.Tag}}  {{.ID}}"' <<< "${out}"
+    # ... and never leaves a stray `}}` behind, which is what `}}}}` did.
+    run grep -F '}}}}' <<< "${out}"
     [ "${status}" -ne 0 ]
 }
 
@@ -68,26 +87,6 @@ have_just() {
             printf 'PARSE FAIL %s\n%s\n' "${f}" "${out}" >&2
             failed=1
         fi
-    done <<< "${JUSTFILES}"
-    [ "${failed}" -eq 0 ]
-}
-
-@test "justfile gate: a de-escaped justfile still parses" {
-    # Reproduces the shipped condition from #1285: a consumer that collapses
-    # `{{{{`/`}}}}` down to `{{`/`}}` turns the old `clean-system` line into an
-    # unparseable justfile, and `just` then refuses to load *any* recipe from it.
-    if ! have_just; then
-        skip "just is not installed in this environment"
-    fi
-    local failed=0 f out collapsed
-    while IFS= read -r f; do
-        collapsed="$(mktemp -d)/$(basename "${f}")"
-        sed -e 's/{{{{/{{/g' -e 's/}}}}/}}/g' "${REPO_ROOT}/${f}" > "${collapsed}"
-        if ! out="$(just --justfile "${collapsed}" --list 2>&1)"; then
-            printf 'DE-ESCAPED PARSE FAIL %s\n%s\n' "${f}" "${out}" >&2
-            failed=1
-        fi
-        rm -f "${collapsed}"
     done <<< "${JUSTFILES}"
     [ "${failed}" -eq 0 ]
 }

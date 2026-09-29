@@ -111,13 +111,13 @@ Not every failing scenario is fixable in `common`. Split them by owner before st
 
 | Failure | Owner | Notes |
 |---|---|---|
-| `ujust bios-info` / `logs-this-boot` / `check-local-overrides` / shared-scripts scenario all exit 1 with `error: unknown start of token '.'` on `default.just:33` | **common** | See "Justfiles must not contain Go-template braces" below. A single unparseable justfile takes down every recipe in it. |
+| `ujust bios-info` / `logs-this-boot` / `check-local-overrides` / shared-scripts scenario all exit 1 with `error: unknown start of token '.'` on `default.just:33` | **bluefin-lts** (not `common`) | `common`'s `main` `default.just` parses and `just --list` on it is clean, so the bytes in the image are not the bytes in this repo. The reported column (`:60`) does not line up with `main` either — column 60 there is the `o` of `--format`, because the `/usr/bin/podman` prefix from #950 shifted the placeholder to column 67. Column 60 only lands on `.` for a pre-#950 line after something collapses `{{{{`→`{{`. So the image holds a copy of this file that is at least seven weeks stale *and* has been through a brace-collapsing step. Ask the LTS image owners where `usr/share/ublue-os/just/default.just` comes from; fixing `common` main does not change it. See "Go templates in justfile recipes" below for the rule the fix here enforces. |
 | `flatpak remotes --system` → `opening repo /var/lib/flatpak/repo: No such file or directory` on `lts-testing` | bluefin-lts | Missing system Flatpak installation in the LTS image, not the shared layer. |
 | `GNOME extension "..." is enabled` with `state=6` / `state=99` | testsuite | The suite's own `local.d/00-ci-testing` dconf write replaces `enabled-extensions` with `['unsafe-mode@bluefin-test']`, so per-extension `ExtensionState` assertions cannot pass. See [`../dconf-consistency.md`](../dconf-consistency.md). |
 
-## Justfiles must not contain Go-template braces
+## Go templates in justfile recipes
 
-`just` lexes a recipe body before handing it to the shell, and a Podman/Docker Go
+`just` lexes a recipe body before handing it to the shell, and a bare Podman/Docker Go
 template placeholder (`--format "{{.Repository}}"`) is not a valid token. One of them
 aborts the parse of the **entire** file:
 
@@ -130,16 +130,28 @@ Every recipe in that file then exits non-zero, including ones that have nothing 
 with the line that broke. It even fires inside a `#` comment, because comments in a
 recipe body are lexed too.
 
-Do not "fix" it by writing `{{{{`. That was an escape for a Jinja-style consumer which
-existed while `default.just` shipped as the `aurorafin-shared` submodule
-(`a917e93`, inlined by `434daa4`). Nothing de-escapes it now, so it is inert — and if
-any consumer ever does, the file becomes unparseable. `tests/test_justfile_syntax.bats`
-gates all three shapes: no `{{`-prefixed token, no `{{{{`, and every `*.just` under
-`system_files/` must parse with `just --list` both as written and after
-`{{{{`→`{{` de-escaping.
+**The escaping rules, which are asymmetric and easy to get wrong:**
 
-For a prune preview, the default `podman image ls` table already shows repository, tag,
-image ID and size — reach for that before reaching for `--format`.
+| You want | Correct spelling | Why |
+|---|---|---|
+| a literal `{{` | `{{{{` | `just` de-escapes the doubled form; this is `just`'s own documented escape, not leftover Jinja escaping |
+| a literal `}}` | `}}` | There is **no** `}}}}` escape — outside an interpolation, `}}` is already literal, so `}}}}` reaches the shell as two stray braces |
+
+`clean-system` in `default.just` had `--format "{{{{.Repository}}}}:{{{{.Tag}}}}  {{{{.ID}}}}"`,
+which is the second row of that table applied to the wrong side: the file parsed, and
+every column printed with a trailing `}}`. The recipe now omits `--format` entirely —
+the default `podman image ls` table already shows repository, tag, image ID and size.
+
+`tests/test_justfile_syntax.bats` gates this across every `*.just` under
+`system_files/` and `bluefin-branding/`: no Go-template placeholder shape, no `}}}}`,
+and every file must parse with `just --list`. `just check`'s existing
+`just --fmt --check` already covers the "parses as written" half; the bats suite is
+what names the failure mode.
+
+One trap when reproducing a reported column number: `just` points at the offending
+token in the file **as it parses**, so if a consumer downstream collapses braces
+before `just` ever sees the file, the column will not match this repo. Check the
+column against `main` before assuming this repo shipped the bad bytes.
 
 ## Testsuite SHA pin
 
@@ -151,7 +163,7 @@ image ID and size — reach for that before reaching for `--format`.
 - A `workflow_run` trigger fix pushed only to `testing` (default-branch constraint means it has no effect until it reaches `main`).
 - The `promote-to-testing` job running on branches other than `main` (double-promotion risk).
 - An unanchored `--certificate-identity-regexp` wildcard in cosign verify.
-- A `--format` Go template in any `*.just` recipe (see "Justfiles must not contain Go-template braces").
+- A `--format` Go template in any `*.just` recipe (see "Go templates in justfile recipes"), and a `}}}}` anywhere in one.
 
 ## Verification
 
