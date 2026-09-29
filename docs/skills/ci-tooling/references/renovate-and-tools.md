@@ -115,8 +115,8 @@ Renovate-tracked while the graph is still being built
 
 The FSDK junction is the one pin the three forks share, so the "one writer per
 pin" rule above is a cross-repo contract rather than a per-repo convention. The
-proposal owner is each fork's scheduled, reviewed `.github/workflows/update-base.yml`
-— **not** Renovate, and never both:
+intended proposal owner is each fork's scheduled, reviewed
+`.github/workflows/update-base.yml` — **not** Renovate, and never both:
 
 - each fork's junction is pinned to a full fsdk-containers commit, so a
   reviewed bump leaves the old digest resolvable for rollback;
@@ -131,15 +131,18 @@ proposal owner is each fork's scheduled, reviewed `.github/workflows/update-base
 contract: it answers, for any fork checkout, whether the junction is pinned to
 a commit, whether the OCI element's `io.projectbluefin.fsdk.version` /
 `io.projectbluefin.fsdk.ref` labels describe the FSDK release that pinned
-commit actually builds on, and whether exactly one thing proposes the junction
-(a missing `update-base.yml`, or a Renovate manager whose file pattern matches
-`elements/fsdk-containers.bst`, is a violation). It is fail-closed: an
+commit actually builds on, and whether exactly one thing proposes the junction.
+It counts two kinds of owner: an `update-base.yml`, and a Renovate manager
+whose file pattern matches `elements/fsdk-containers.bst`. Zero owners and two
+owners are both violations; **which** of the two owns it is a review decision
+the check does not make, so a fork carrying only a Renovate manager passes the
+check while still contradicting the policy above. It is fail-closed: an
 unreadable pin or a malformed `renovate.json` is a violation, never a pass.
 Renovate file patterns are read with Renovate's own syntax: `fileMatch` entries
 are always regexes, `managerFilePatterns` entries are globs unless wrapped in
 slashes.
 
-Two limits are stated rather than assumed away:
+Three limits are stated rather than assumed away:
 
 - **it is a tool, not a gate.** Only its unit tests run in CI; no workflow runs
   the check itself against a fork yet, so it is something to run by hand (or
@@ -148,7 +151,12 @@ Two limits are stated rather than assumed away:
   `gutenprint-printer-app` extend `local>projectbluefin/renovate-config`, so a
   custom manager over the junction defined in a shared preset is invisible to
   the check; an `extends` list is printed as a `note:` on stderr for that
-  reason.
+  reason;
+- **the pinned commit is not checked for reachability from `fsdk-containers`
+  `stable`.** `common#1246`'s first criterion is that the junction tracks a
+  reviewed stable release, not a floating branch head; the check fetches the
+  pinned commit directly and all three forks still `track: main`, so "pinned
+  and immutable" is verified but "pinned to something reviewed" is not yet.
 
 ```bash
 # Against local checkouts, or by cloning each fork's testing branch:

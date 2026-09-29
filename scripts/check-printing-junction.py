@@ -32,19 +32,25 @@ checkout, so one contract has one owner instead of three divergent copies of it.
 3. Is there exactly one proposal owner for the junction? The reviewed daily
    updater (``.github/workflows/update-base.yml``) and a Renovate manager over
    ``elements/fsdk-containers.bst`` would both propose the same line, which is
-   exactly the "Renovate or a scheduled reviewed updater, not both" rule.
+   exactly the "Renovate or a scheduled reviewed updater, not both" rule. Both
+   count as an owner: zero owners and two owners are violations, and choosing
+   *which* of the two owns the junction stays a review decision, so a fork
+   carrying only a Renovate manager passes this check.
 
 Every check fails closed. An unpinned or ambiguous junction, a missing label, a
 ref that is not a release-tagged FSDK pin, a failed fetch, an unreadable
-``renovate.json`` or a missing updater workflow all exit non-zero, because
+``renovate.json`` or a junction nothing proposes all exit non-zero, because
 "could not read the state" is never "the state is correct".
 
-Two limits are reported rather than assumed away. Only the fork's own
+Three limits are reported rather than assumed away. Only the fork's own
 ``renovate.json`` is parsed, so a custom manager defined in an inherited preset
 (the forks extend ``local>projectbluefin/renovate-config``) is invisible here
-and an ``extends`` list is printed as a note. And nothing in CI runs this yet:
-it is a tool to run against a fork checkout, not a gate, until a workflow
-invokes it.
+and an ``extends`` list is printed as a note. Nothing in CI runs this yet: it
+is a tool to run against a fork checkout, not a gate, until a workflow invokes
+it. And the pinned commit is fetched directly rather than tested for
+reachability from ``fsdk-containers`` ``stable``, so common#1246's first
+criterion -- track a reviewed stable release, not a floating branch head -- is
+only half covered here while all three forks still ``track: main``.
 
 Usage::
 
