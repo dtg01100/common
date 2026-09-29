@@ -111,6 +111,50 @@ is scoped to `github-actions`, so nothing in that repo's printing graph is
 Renovate-tracked while the graph is still being built
 ([ps-printer-app#2](https://github.com/projectbluefin/ps-printer-app/issues/2)).
 
+#### The shared printing base junction (`common#1246`)
+
+The FSDK junction is the one pin the three forks share, so the "one writer per
+pin" rule above is a cross-repo contract rather than a per-repo convention. The
+proposal owner is each fork's scheduled, reviewed `.github/workflows/update-base.yml`
+— **not** Renovate, and never both:
+
+- each fork's junction is pinned to a full fsdk-containers commit, so a
+  reviewed bump leaves the old digest resolvable for rollback;
+- the updater restores a plain commit after `just bst source track`, because
+  the project-wide `git-describe` ref format would otherwise rewrite the same
+  commit as a change;
+- it opens one pull request against `testing`. Nothing reaches `stable` except
+  through the fork's `promote-stable.yml`, which rebuilds both arches and
+  re-checks the FSDK labels on the image it actually built.
+
+`scripts/check-printing-junction.py` is the cross-repository half of that
+contract: it answers, for any fork checkout, whether the junction is pinned to
+a commit, whether the OCI element's `io.projectbluefin.fsdk.version` /
+`io.projectbluefin.fsdk.ref` labels describe the FSDK release that pinned
+commit actually builds on, and whether exactly one thing proposes the junction
+(a missing `update-base.yml`, or a Renovate manager whose file pattern matches
+`elements/fsdk-containers.bst`, is a violation). It is fail-closed: an
+unreadable pin or a malformed `renovate.json` is a violation, never a pass.
+
+```bash
+# Against local checkouts, or by cloning each fork's testing branch:
+scripts/check-printing-junction.py ../ps-printer-app ../hplip-printer-app
+scripts/check-printing-junction.py --repo gutenprint-printer-app
+scripts/check-printing-junction.py --repo ps-printer-app --no-fetch  # no network
+```
+
+Its own suite is `tests/test_check_printing_junction.py` (part of `just test`)
+and reads the nested pin from a scratch git repository, so it needs no network.
+
+The hand-written labels are the reason the check exists: the junction bump
+moves FSDK, and only the updater that moves it knows the new release, so the
+proposal that changes the junction must change the labels in the same commit.
+`gutenprint-printer-app` does that today (`scripts/fsdk-pin.sh` plus
+`tests/source-pins.sh`); `ps-printer-app` refuses a mismatch with
+`scripts/verify-fsdk-metadata.py` but does not rewrite the labels in its
+proposal, and `hplip-printer-app` currently has neither — see
+[common#1246](https://github.com/projectbluefin/common/issues/1246).
+
 #### Bot identity
 
 Renovate PRs are authored by the **Mergeraptor GitHub App**. GitHub reports the

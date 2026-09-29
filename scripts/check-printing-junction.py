@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+"""Check the shared printing base junction of the printer application forks.
+
+The three printer forks -- ps-printer-app, hplip-printer-app and
+gutenprint-printer-app -- reach the shared printing base (patched FSDK CUPS,
+cups-filters, libcupsfilters, libppd, ghostscript, mutool, avahi-printing,
+PAPPL and pappl-retrofit) only through one BuildStream junction::
+
+    elements/fsdk-containers.bst             pins fsdk-containers by commit
+    fsdk-containers elements/freedesktop-sdk.bst at that commit
+                                             pins FSDK as
+                                             freedesktop-sdk-<version>-<n>-g<ref>
+
+and each advertises that nested pin as two hand-written labels in its OCI
+element::
+
+    io.projectbluefin.fsdk.version   the freedesktop-sdk point release
+    io.projectbluefin.fsdk.ref       the freedesktop-sdk commit
+
+common#1246 asks for one reviewed proposal owner for that junction across the
+three forks, an atomic update of the junction and the packaged FSDK metadata,
+and a check that the two agree before promotion. This script is the
+cross-repository half of that: it answers three questions about any fork
+checkout, so one contract has one owner instead of three divergent copies of it.
+
+1. Is the junction pinned to a full commit? A branch, a tag or a floating
+   ``track:`` target is not an immutable base, and the old digest must stay
+   resolvable for rollback.
+2. Do the OCI labels describe the FSDK release the pinned fsdk-containers
+   commit actually builds on? Drift here means the image claims a base it was
+   not built from.
+3. Is there exactly one proposal owner for the junction? The reviewed daily
+   updater (``.github/workflows/update-base.yml``) and a Renovate manager over
+   ``elements/fsdk-containers.bst`` would both propose the same line, which is
+   exactly the "Renovate or a scheduled reviewed updater, not both" rule.
+
+Every check fails closed. An unpinned or ambiguous junction, a missing label, a
+ref that is not a release-tagged FSDK pin, a failed fetch, an unreadable
+``renovate.json`` or a missing updater workflow all exit non-zero, because
+"could not read the state" is never "the state is correct".
+
+Usage::
+
+    scripts/check-printing-junction.py /path/to/ps-printer-app [...]
+    scripts/check-printing-junction.py --repo hplip-printer-app   # from GitHub
+
+``--fsdk-remote`` points the nested-pin lookup at another remote (the tests use
+a scratch repository) and ``--no-fetch`` skips it, leaving only checks 1 and 3.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Sequence
+
+LABEL_VERSION = "io.projectbluefin.fsdk.version"
+LABEL_REF = "io.projectbluefin.fsdk.ref"
+
+JUNCTION = "elements/fsdk-containers.bst"
+UPDATER = ".github/workflows/update-base.yml"
+RENOVATE = "renovate.json"
+FSDK_CONTAINERS_URL = "https://github.com/projectbluefin/fsdk-containers.git"
+FSDK_FREEDESKTOP_SDK = "elements/freedesktop-sdk.bst"
+
+# The forks, and the OCI element that carries the labels in each.
+FORKS = {
+    "ps-printer-app": "elements/oci/ps-printer-app.bst",
+    "hplip-printer-app": "elements/oci/hplip-printer-app.bst",
+    "gutenprint-printer-app": "elements/oci/gutenprint-printer-app.bst",
+}
+
+COMMIT = re.compile(r"^[0-9a-f]{40}$")
+SIMPLE_REF = re.compile(r"^[ \t]*ref:[ \t]*(?P<value>\S+)[ \t]*$", re.MULTILINE)
+FSDK_REF = re.compile(
+    r"^freedesktop-sdk-(?P<version>\S+?)-(?P<count>\d+)-g(?P<ref>[0-9a-f]{40})$"
+)
+LABEL = r"^[ \t]*'io\.projectbluefin\.fsdk\.%s':[ \t]*'(?P<value>[^']*)'"
+
+
+class Failure(Exception):
+    """A condition that must stop the caller rather than be worked around."""
+
+
+def read_text(path: Path, describes: str) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise Failure(f"{path} does not exist, so {describes} cannot be read") from None
+    except OSError as error:
+        raise Failure(f"cannot read {path}: {error}") from None
+
+
+def junction_ref(tree: Path) -> str:
+    """The commit the fsdk-containers junction is pinned to.
+
+    ``git-describe`` refs (``freedesktop-sdk-...``) cannot appear here: the
+    updater restores a plain commit after tracking so the same fsdk-containers
+    commit is never rewritten as a change, and a describe-shaped ref would make
+    the base neither immutable nor comparable.
+    """
+    text = read_text(tree / JUNCTION, f"the {JUNCTION} pin")
+    refs = [match.group("value") for match in SIMPLE_REF.finditer(text)]
+    if not refs:
+        raise Failure(f"{JUNCTION} pins no source ref, so the base is not immutable")
+    if len(set(refs)) > 1:
+        raise Failure(f"{JUNCTION} pins {len(set(refs))} different refs; it must pin one")
+    ref = refs[0]
+    if not COMMIT.match(ref):
+        raise Failure(
+            f"{JUNCTION} pins '{ref}', which is not a full commit; a branch, tag or "
+            "describe-shaped ref is a moving base and leaves no digest to roll back to"
+        )
+    return ref
+
+
+def oci_labels(tree: Path, oci_element: str) -> tuple[str, str]:
+    text = read_text(tree / oci_element, f"the {LABEL_VERSION}/{LABEL_REF} labels")
+    values = {}
+    for key, pattern in (("version", LABEL % "version"), ("ref", LABEL % "ref")):
+        match = re.search(pattern, text, re.MULTILINE)
+        if not match:
+            raise Failure(f"{oci_element} does not label io.projectbluefin.fsdk.{key}")
+        values[key] = match.group("value")
+    if not COMMIT.match(values["ref"]):
+        raise Failure(
+            f"{oci_element} labels io.projectbluefin.fsdk.ref as "
+            f"'{values['ref']}', which is not a full commit"
+        )
+    return values["version"], values["ref"]
+
+
+def fsdk_pin(commit: str, remote: str) -> tuple[str, str]:
+    """The FSDK version and commit that fsdk-containers builds on at ``commit``."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        try:
+            subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "fetch", "-q", "--depth", "1", remote, commit],
+                check=True,
+                capture_output=True,
+            )
+            junction = subprocess.run(
+                ["git", "-C", str(repo), "show", f"FETCH_HEAD:{FSDK_FREEDESKTOP_SDK}"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        except (subprocess.CalledProcessError, OSError) as error:
+            detail = getattr(error, "stderr", "") or error
+            raise Failure(
+                f"cannot read {FSDK_FREEDESKTOP_SDK} from fsdk-containers "
+                f"{commit[:12]} at {remote}: {str(detail).strip()}"
+            ) from None
+    match = None
+    for candidate in SIMPLE_REF.finditer(junction):
+        found = FSDK_REF.match(candidate.group("value"))
+        if found:
+            match = found
+            break
+    if not match:
+        raise Failure(
+            f"fsdk-containers {commit[:12]} pins no "
+            "freedesktop-sdk-<version>-<n>-g<commit> ref, so its FSDK release is ambiguous"
+        )
+    return match.group("version"), match.group("ref")
+
+
+def renovate_file_patterns(config: dict) -> list[str]:
+    patterns: list[str] = []
+    managers = config.get("customManagers")
+    if isinstance(managers, list):
+        for manager in managers:
+            if isinstance(manager, dict):
+                for key in ("managerFilePatterns", "fileMatch"):
+                    value = manager.get(key)
+                    if isinstance(value, list):
+                        patterns.extend(v for v in value if isinstance(v, str))
+    if isinstance(config.get("enabledManagers"), list):
+        patterns.extend(
+            f"<manager:{manager}>" for manager in config["enabledManagers"] if isinstance(manager, str)
+        )
+    return patterns
+
+
+def pattern_matches_junction(pattern: str) -> bool:
+    """Whether a Renovate ``managerFilePatterns`` / ``fileMatch`` entry can
+    match ``elements/fsdk-containers.bst``.
+
+    Both shapes exist in the wild and both are honoured: a glob
+    (``include/source-pins.yml``) and a regex wrapped in slashes
+    (``/^elements\\/fsdk-containers\\.bst$/``), which is how the printer forks
+    write theirs.
+    """
+    if pattern.startswith("/") and pattern.endswith("/") and len(pattern) > 1:
+        try:
+            return re.search(pattern[1:-1], JUNCTION) is not None
+        except re.error:
+            raise Failure(f"renovate.json file pattern {pattern!r} is not a regex") from None
+    return fnmatch.fnmatch(JUNCTION, pattern.lstrip("/"))
+
+
+def renovate_manages_junction(config: dict) -> bool:
+    """True when a Renovate manager could rewrite ``elements/fsdk-containers.bst``.
+
+    A manager is only a second writer for the junction if its file patterns can
+    match the junction file. ``enabledManagers`` entries such as
+    ``github-actions`` name no file pattern, so they are reported for the record
+    but never counted as a manager of a ``.bst`` element.
+    """
+    for pattern in renovate_file_patterns(config):
+        if not pattern.startswith("<manager:") and pattern_matches_junction(pattern):
+            return True
+    return False
+
+
+def check_tree(tree: Path, oci_element: str, remote: str, fetch: bool = True) -> list[str]:
+    """Every contract violation of one fork checkout, as plain sentences."""
+    violations: list[str] = []
+
+    # 1. An immutable junction, with one proposal owner.
+    updater = tree / UPDATER
+    if not updater.is_file():
+        violations.append(
+            f"{tree.name} has no {UPDATER}: nothing proposes the shared junction, so a "
+            "new FSDK release would leave this image on a stale base indefinitely"
+        )
+    renovate_config = tree / RENOVATE
+    if renovate_config.is_file():
+        try:
+            config = json.loads(renovate_config.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise Failure(f"cannot read {renovate_config}: {error}") from None
+        if renovate_manages_junction(config):
+            violations.append(
+                f"{renovate_config.name} has a manager over {JUNCTION} and {UPDATER} also "
+                "proposes it: two proposal owners for one junction means duplicate or "
+                "racing updates; keep exactly one"
+            )
+
+    try:
+        commit = junction_ref(tree)
+    except Failure as failure:
+        violations.append(str(failure))
+        return violations
+
+    # 2. Labels that describe the FSDK release the junction actually pins.
+    try:
+        version, ref = oci_labels(tree, oci_element)
+    except Failure as failure:
+        violations.append(str(failure))
+        return violations
+
+    if not fetch:
+        return violations
+
+    try:
+        pinned_version, pinned_ref = fsdk_pin(commit, remote)
+    except Failure as failure:
+        violations.append(str(failure))
+        return violations
+
+    if version != pinned_version:
+        violations.append(
+            f"{oci_element} labels io.projectbluefin.fsdk.version as '{version}' but "
+            f"fsdk-containers {commit[:12]} builds on FSDK {pinned_version}"
+        )
+    if ref != pinned_ref:
+        violations.append(
+            f"{oci_element} labels io.projectbluefin.fsdk.ref as '{ref}' but "
+            f"fsdk-containers {commit[:12]} pins FSDK commit {pinned_ref}"
+        )
+    return violations
+
+
+def infer_oci_element(tree: Path) -> str | None:
+    """The single OCI element carrying the FSDK labels, if the tree names one.
+
+    Lets the checker run against a checkout under any directory name, which is
+    what a fork's own CI would do; FORKS is only the convenience mapping.
+    """
+    oci_dir = tree / "elements/oci"
+    if not oci_dir.is_dir():
+        return None
+    labelled = [
+        element
+        for element in sorted(oci_dir.glob("*.bst"))
+        if re.search(LABEL % "version", read_text(element, "its FSDK labels"), re.MULTILINE)
+    ]
+    return str(labelled[0].relative_to(tree)) if len(labelled) == 1 else None
+
+
+def check_fork(
+    name: str,
+    tree: Path,
+    remote: str,
+    fetch: bool = True,
+    oci_element: str | None = None,
+) -> list[str]:
+    element = oci_element or FORKS.get(name) or infer_oci_element(tree)
+    if not element:
+        raise Failure(
+            f"cannot tell which element of {tree} carries the {LABEL_VERSION}/{LABEL_REF} "
+            f"labels; pass --oci-element (known forks: {', '.join(sorted(FORKS))})"
+        )
+    return check_tree(tree, element, remote, fetch=fetch)
+
+
+def clone(name: str, ref: str, destination: Path) -> Path:
+    url = f"https://github.com/projectbluefin/{name}.git"
+    try:
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "1", "--branch", ref, url, str(destination)],
+            check=True,
+            capture_output=True,
+        )
+    except (subprocess.CalledProcessError, OSError) as error:
+        detail = getattr(error, "stderr", "") or error
+        raise Failure(f"cannot clone {url} at {ref}: {str(detail).strip()}") from None
+    return destination
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "trees",
+        nargs="*",
+        type=Path,
+        help="fork checkouts to check; defaults to --repo for each named fork",
+    )
+    parser.add_argument(
+        "--repo",
+        action="append",
+        default=[],
+        metavar="FORK",
+        help="check a fork by name, cloning its branch from projectbluefin (repeatable)",
+    )
+    parser.add_argument(
+        "--ref",
+        default="testing",
+        help="branch to clone for --repo (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--fsdk-remote",
+        default=FSDK_CONTAINERS_URL,
+        help="where to read the nested FSDK pin (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--oci-element",
+        help=(
+            "the OCI element carrying the FSDK labels; by default the fork name is "
+            "looked up and, failing that, the labels are found in the checkout"
+        ),
+    )
+    parser.add_argument(
+        "--no-fetch",
+        action="store_true",
+        help="skip the nested FSDK pin lookup (checks 1 and 3 only, no network)",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="print nothing when every fork is clean",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    trees = list(args.trees)
+    oci_element = args.oci_element
+    # The clones must outlive the loop that checks them, so this cannot be a
+    # context manager: a TemporaryDirectory would delete the trees before they
+    # are read.
+    clones: str | None = None
+    try:
+        if oci_element and len(args.repo) + len(trees) != 1:
+            print("--oci-element applies to a single checkout", file=sys.stderr)
+            return 2
+        if args.repo:
+            clones = tempfile.mkdtemp(prefix="check-printing-junction-")
+            for name in args.repo:
+                try:
+                    trees.append(clone(name, args.ref, Path(clones) / name))
+                except Failure as failure:
+                    print(f"check-printing-junction: {failure}", file=sys.stderr)
+                    return 1
+        if not trees:
+            print("no fork checkout or --repo given; nothing to check", file=sys.stderr)
+            return 2
+
+        total = 0
+        for tree in trees:
+            name = tree.resolve().name
+            try:
+                violations = check_fork(
+                    name, tree, args.fsdk_remote, fetch=not args.no_fetch, oci_element=oci_element
+                )
+            except Failure as failure:
+                print(f"check-printing-junction: {failure}", file=sys.stderr)
+                return 1
+            for violation in violations:
+                print(f"{name}: {violation}", file=sys.stderr)
+            total += len(violations)
+            if not violations and not args.quiet:
+                print(f"{name}: OK")
+        if total:
+            print(f"check-printing-junction: {total} violation(s)", file=sys.stderr)
+            return 1
+        if not args.quiet:
+            print("check-printing-junction: OK")
+        return 0
+    finally:
+        if clones:
+            shutil.rmtree(clones, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
