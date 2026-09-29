@@ -16,9 +16,10 @@
 #           so `}}}}` reaches the shell as two stray braces.
 #
 # So the three gates are:
-#   1. no `*.just` file contains an UNESCAPED Go-template placeholder (`{{.`).
-#      The escaped spelling `{{{{.` is legal and deliberately allowed — see the
-#      "{{{{ literal-brace escape is accepted" test below.
+#   1. no `*.just` file contains an UNESCAPED Go-template placeholder
+#      (`{{.`, `{{ .`, `{{json .}}`, ...). The escaped spelling `{{{{.` is legal
+#      and deliberately allowed — see the "{{{{ literal-brace escape is
+#      accepted" test below.
 #   2. no `*.just` file contains `}}}}`
 #   3. every `*.just` file actually parses with `just --list`
 #
@@ -30,8 +31,10 @@
 # Run: bats tests/test_justfile_syntax.bats
 
 setup() {
-    REPO_ROOT="${BATS_TEST_DIRNAME}/.."
-    JUSTFILES="$(cd "${REPO_ROOT}" && find system_files bluefin-branding -name '*.just' -type f 2>/dev/null | sort)"
+    # Absolute REPO_ROOT: bats may be invoked from any directory, and the
+    # discovered paths must be readable no matter what the caller's cwd is.
+    REPO_ROOT="$(cd "${BATS_TEST_DIRNAME}/.." && pwd)"
+    JUSTFILES="$(cd "${REPO_ROOT}" && find system_files bluefin-branding -name '*.just' -type f 2>/dev/null | sed "s|^|${REPO_ROOT}/|" | sort)"
     export REPO_ROOT JUSTFILES
 }
 
@@ -65,13 +68,15 @@ assert_no_justfile_matches() {
 @test "justfile gate: test fixtures were discovered" {
     [ -n "${JUSTFILES}" ]
     # The file that regressed in #1285 must be part of the gate.
-    run grep -Fx "system_files/shared/usr/share/ublue-os/just/default.just" <<< "${JUSTFILES}"
+    run grep -Fx "${REPO_ROOT}/system_files/shared/usr/share/ublue-os/just/default.just" <<< "${JUSTFILES}"
     [ "${status}" -eq 0 ]
 }
 
 @test "justfile gate: no justfile contains an unescaped Go-template brace placeholder" {
-    # A Go template placeholder is `{{` followed immediately by `.`, which is
-    # what `just` refuses to lex. Matching on the dot rather than on
+    # A Go template placeholder is `{{` followed by something that starts a
+    # field/function reference — a leading dot, optionally spaced, or an
+    # identifier pipeline that ends in a dot (`{{ .Repository }}`, `{{json .}}`).
+    # All of those abort the `just` parse; matching on the dot rather than on
     # `[A-Za-z_]` keeps legal just interpolations (`{{ args }}`,
     # `{{ source_directory() }}`) out of the net.
     #
@@ -80,7 +85,7 @@ assert_no_justfile_matches() {
     # by `{`, so it does not match. That spelling is legal (it de-escapes to
     # `{{.Repository}}`) and is what the escape test below asserts. Only the
     # bare, unescaped form is banned here.
-    run assert_no_justfile_matches '(^|[^{])\{\{\.'
+    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
     [ "${status}" -eq 0 ]
 }
 
@@ -119,12 +124,30 @@ assert_no_justfile_matches() {
 
     printf 'probe:\n    echo "{{.Repository}}"\n' > "${dir}/bare.just"
     JUSTFILES="${dir}/bare.just"
-    run assert_no_justfile_matches '(^|[^{])\{\{\.'
+    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
     [ "${status}" -ne 0 ]
+
+    # Spaced and piped spellings abort the parse just the same and must be
+    # caught by the same gate.
+    printf 'probe:\n    echo "{{ .Repository }}"\n' > "${dir}/spaced.just"
+    JUSTFILES="${dir}/spaced.just"
+    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
+    [ "${status}" -ne 0 ]
+
+    printf 'probe:\n    echo "{{json .}}"\n' > "${dir}/piped.just"
+    JUSTFILES="${dir}/piped.just"
+    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
+    [ "${status}" -ne 0 ]
+
+    # Legal just interpolations must not trip it.
+    printf 'probe arg:\n    echo "{{ arg }} {{ source_directory() }}"\n' > "${dir}/legal.just"
+    JUSTFILES="${dir}/legal.just"
+    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
+    [ "${status}" -eq 0 ]
 
     printf 'probe:\n    echo "{{{{.Repository}}"\n' > "${dir}/escaped.just"
     JUSTFILES="${dir}/escaped.just"
-    run assert_no_justfile_matches '(^|[^{])\{\{\.'
+    run assert_no_justfile_matches '(^|[^{])\{\{[[:space:]]*(\.|[A-Za-z_][A-Za-z0-9_]*[[:space:]]+\.)'
     [ "${status}" -eq 0 ]
 
     JUSTFILES="${saved}"

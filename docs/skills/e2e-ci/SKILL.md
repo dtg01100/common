@@ -146,10 +146,17 @@ not) buys nothing here.
 
 `tests/test_justfile_syntax.bats` gates this across every `*.just` under
 `system_files/` and `bluefin-branding/`: no *unescaped* Go-template placeholder
-(`{{.`), no `}}}}`, and every file must parse with `just --list`. The escaped
+(`{{.`, `{{ .Repository }}`, `{{json .}}`, ...), no `}}}}`, and every file must parse
+with `just --list`. The escaped
 spelling `{{{{.` stays legal — a suite test pins that, so the gate cannot drift into
-banning `just`'s own escape. `just check`'s existing `just --fmt --check` already
-covers the "parses as written" half; the bats suite is what names the failure mode.
+banning `just`'s own escape. Gate 1 matches the placeholder shapes directly, so it
+costs nothing in CI; gate 3 (`just --list`) is the backstop for anything the pattern
+misses and `skip`s when `just` is not installed. The suite is registered in
+`Justfile:28` (`just test`); the matching `Run bats (justfile brace syntax gate)` step
+in `.github/workflows/unit-tests.yml` is still to land — that workflow names each bats
+file explicitly and never calls `just test`, so until the step lands the gate only runs
+locally. `just check`'s existing `just --fmt --check` already covers the "parses as
+written" half, and the bats suite is what names the failure mode.
 
 One trap when reproducing a reported column number: `just` points at the offending
 token in the file **as it parses**, so if a consumer downstream collapses braces
@@ -166,7 +173,7 @@ column against `main` before assuming this repo shipped the bad bytes.
 - A `workflow_run` trigger fix pushed only to `testing` (default-branch constraint means it has no effect until it reaches `main`).
 - The `promote-to-testing` job running on branches other than `main` (double-promotion risk).
 - An unanchored `--certificate-identity-regexp` wildcard in cosign verify.
-- A bare, unescaped Go-template placeholder (`{{.`) in any `*.just` recipe (see "Go templates in justfile recipes"), and a `}}}}` anywhere in one.
+- A bare, unescaped Go-template placeholder (`{{.`, `{{ .Repository }}`, `{{json .}}`) in any `*.just` recipe (see "Go templates in justfile recipes"), and a `}}}}` anywhere in one.
 
 ## Verification
 
