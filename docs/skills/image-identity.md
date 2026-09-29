@@ -110,6 +110,25 @@ Four findings worth acting on, in rough priority order:
 
 Do not "fix" these by editing the writers from common — see Red Flags.
 
+### `image-flavor` is identity, not (yet) a branding contract
+
+A flavor value is a machine-readable image attribute. It is **not** an
+implication that a surface should restyle itself. Any *org-wide* convention of
+the form "gaming images look different" is a product decision, not a schema
+detail, and needs a record under `docs/design/` before consumers act on it —
+see [`docs/design/gaming-ogc-branding.md`](../design/gaming-ogc-branding.md)
+(common#1156), which asks whether `image-flavor: gaming` should imply OGC
+branding. Until that record is filled in, common states no org-wide branding
+contract for the flavor field: do not add a *new* cross-repo styling
+convention keyed off it.
+
+An individual application may still choose its own per-application default
+from the flavor — that is option B in the record, and
+[chairlift#194](https://github.com/projectbluefin/chairlift/pull/194) already
+shipped one. Such a default is the owning application's call, is not an
+override of an explicit user choice, and carries no claim on any other
+consumer.
+
 ## Layer 2 — build-time variant declaration (per-repo owns)
 
 Each repo declares variants locally, in the shape its build system needs, and
@@ -189,17 +208,6 @@ gh api repos/projectbluefin/server/contents/include/arch.yml \
 # Registry paths and flavor tables are owned by the sibling skill — do not
 # restate them here; read docs/skills/image-registry.md instead.
 ```
-
-### `image-flavor` is identity, not (yet) a branding contract
-
-A flavor value is a machine-readable image attribute. It is **not** an
-implication that a surface should restyle itself. Any convention of the form
-"gaming images look different" is a product decision, not a schema detail,
-and needs a record under `docs/design/` before consumers act on it — see
-[`docs/design/gaming-ogc-branding.md`](../design/gaming-ogc-branding.md)
-(common#1156), which asks whether `image-flavor: gaming` should imply OGC
-branding. Until that record is filled in, treat the flavor as descriptive
-only: read it, do not style from it.
 
 ### Incident log
 

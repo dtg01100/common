@@ -45,7 +45,11 @@ Per [`docs/skills/image-identity.md`](../skills/image-identity.md), that
 flavor field is runtime identity vocabulary owned by **common** — so any
 convention that keys off `image-flavor: gaming` (or a `-gaming` image-name
 suffix) needs a common-side statement, not nine independent implementations.
-That is why the decision is filed here rather than in ChairLift.
+That is why the decision is filed here rather than in ChairLift. That skill's
+"`image-flavor` is identity, not (yet) a branding contract" note carries the
+matching carve-out: no *org-wide* contract exists until §9 is filled in, while
+a per-application default such as chairlift#194 stays the owning
+application's call.
 
 chairlift#194 is a **default, not an override**: a user who deliberately
 picked another mark keeps it. It also explicitly leaves the org-wide
@@ -73,7 +77,9 @@ bounds (roughly `0 -86 256 256`), so it needs correcting before it renders
 as a square icon. Fixing that downstream, in every consumer, is the drift
 the decision should prevent.
 
-Candidate homes, in the maintainers' order of preference:
+Candidate homes, framed here for the maintainers to rank (this list is not a
+maintainer preference order; common#1156 calls a press-kit path "the obvious
+candidate" and says nothing about the rest):
 
 1. A press-kit path in an OGC repository (`opengamingcollective.org` or a
    dedicated `opengamingcollective/brand` repo) that publishes the wordmark,
@@ -94,7 +100,7 @@ like any other.
 | Panel icon (ChairLift / Livery) | yes | Already defaulted to OGC by chairlift#194 |
 | Files (Nautilus) icon | yes | Would change every file-manager surface; highest visibility |
 | App-grid / dash glyph | yes | Smaller surface, easier to justify |
-| Wallpaper | flavor-keyed, different mechanism | Wallpaper selection already keys off flavor in some images; see [`docs/skills/hidamari-wallpaper.md`](../skills/hidamari-wallpaper.md) for the pattern |
+| Wallpaper | no — different mechanism | Wallpaper is selected by a user-setup hook (`system_files/bluefin/usr/share/ublue-os/user-setup.hooks.d/20-dynamic-wallpaper.sh`), not by the `IsGaming()` runtime check; it does not read `image-flavor` today, so Option A would have to add that keying |
 | Installer / plymouth | build-time, not runtime | Cross-repo: installer and plymouth themes live outside common; a decision here implies work there |
 
 Overriding a user's explicit mark choice is **not** on this list. Whatever
