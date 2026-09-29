@@ -41,6 +41,7 @@ junction_ref = _mod.junction_ref
 main = _mod.main
 oci_labels = _mod.oci_labels
 renovate_file_patterns = _mod.renovate_file_patterns
+renovate_extends = _mod.renovate_extends
 renovate_manages_junction = _mod.renovate_manages_junction
 
 
@@ -262,22 +263,60 @@ class TestRenovate:
         }
         assert renovate_manages_junction(config) is False
 
-    def test_file_match_is_also_a_pattern(self):
-        config = {"customManagers": [{"customType": "regex", "fileMatch": ["*fsdk-containers.bst"]}]}
+    def test_file_match_entries_are_regexes_not_globs(self):
+        # Renovate's legacy fileMatch is always a regex, so an unwrapped one
+        # over the junction is still a second owner.
+        config = {
+            "customManagers": [
+                {"customType": "regex", "fileMatch": [r"^elements/fsdk-containers\.bst$"]}
+            ]
+        }
         assert renovate_manages_junction(config) is True
-        assert renovate_file_patterns(config) == ["*fsdk-containers.bst"]
+        assert renovate_file_patterns(config) == [
+            ("fileMatch", r"^elements/fsdk-containers\.bst$")
+        ]
 
-    def test_a_glob_for_another_file_is_not_a_second_owner(self):
-        config = {"customManagers": [{"customType": "regex", "fileMatch": ["include/*.yml"]}]}
+    def test_a_bare_suffix_file_match_matches_the_junction(self):
+        config = {"customManagers": [{"customType": "regex", "fileMatch": [r"\.bst$"]}]}
+        assert renovate_manages_junction(config) is True
+
+    def test_a_file_match_for_another_file_is_not_a_second_owner(self):
+        config = {"customManagers": [{"customType": "regex", "fileMatch": [r"^include/.*\.yml$"]}]}
         assert renovate_manages_junction(config) is False
+
+    def test_a_glob_manager_file_pattern_for_another_file_is_not_a_second_owner(self):
+        config = {"customManagers": [{"customType": "regex", "managerFilePatterns": ["include/*.yml"]}]}
+        assert renovate_manages_junction(config) is False
+
+    def test_a_glob_manager_file_pattern_over_the_junction_is_a_second_owner(self):
+        config = {
+            "customManagers": [
+                {"customType": "regex", "managerFilePatterns": ["elements/*.bst"]}
+            ]
+        }
+        assert renovate_manages_junction(config) is True
 
     def test_an_unparseable_pattern_fails_closed(self):
         config = {"customManagers": [{"customType": "regex", "managerFilePatterns": ["/[unclosed/"]}]}
         with pytest.raises(Failure, match="is not a regex"):
             renovate_manages_junction(config)
 
+    def test_an_unparseable_file_match_fails_closed(self):
+        config = {"customManagers": [{"customType": "regex", "fileMatch": ["[unclosed"]}]}
+        with pytest.raises(Failure, match="is not a regex"):
+            renovate_manages_junction(config)
+
     def test_malformed_config_types_are_ignored_not_crashed(self):
         assert renovate_file_patterns({"customManagers": "nope", "enabledManagers": None}) == []
+
+    def test_extends_lists_the_inherited_presets(self):
+        assert renovate_extends({"extends": ["local>projectbluefin/renovate-config", 7]}) == [
+            "local>projectbluefin/renovate-config"
+        ]
+
+    def test_extends_of_the_wrong_type_is_no_preset(self):
+        assert renovate_extends({"extends": "local>x"}) == []
+        assert renovate_extends({}) == []
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +363,52 @@ class TestCheckTree:
         )
         violations = check_tree(tree, "elements/oci/ps-printer-app.bst", str(fsdk_remote))
         assert any("two proposal owners" in v for v in violations)
+
+    def test_renovate_alone_is_one_owner_not_a_contradiction(self, tmp_path, fsdk_remote):
+        tree = write_tree(
+            tmp_path / "ps-printer-app",
+            remote=fsdk_remote,
+            updater=False,
+            renovate={
+                "customManagers": [
+                    {
+                        "customType": "regex",
+                        "managerFilePatterns": [r"/^elements\/fsdk-containers\.bst$/"],
+                    }
+                ]
+            },
+        )
+        violations = check_tree(tree, "elements/oci/ps-printer-app.bst", str(fsdk_remote))
+        # One owner: neither "nothing proposes" nor "also proposes it".
+        assert violations == []
+
+    def test_an_inherited_preset_is_reported_as_a_limit(self, tmp_path, fsdk_remote):
+        tree = write_tree(
+            tmp_path / "ps-printer-app",
+            remote=fsdk_remote,
+            renovate={"extends": ["local>projectbluefin/renovate-config"]},
+        )
+        notes: list[str] = []
+        violations = check_tree(
+            tree, "elements/oci/ps-printer-app.bst", str(fsdk_remote), notes=notes
+        )
+        assert violations == []
+        assert any("renovate-config" in note for note in notes)
+
+    def test_no_preset_note_when_renovate_already_owns_the_junction(self, tmp_path, fsdk_remote):
+        tree = write_tree(
+            tmp_path / "ps-printer-app",
+            remote=fsdk_remote,
+            renovate={
+                "extends": ["local>projectbluefin/renovate-config"],
+                "customManagers": [
+                    {"customType": "regex", "fileMatch": [r"^elements/fsdk-containers\.bst$"]}
+                ],
+            },
+        )
+        notes: list[str] = []
+        check_tree(tree, "elements/oci/ps-printer-app.bst", str(fsdk_remote), notes=notes)
+        assert notes == []
 
     def test_rejects_unreadable_renovate_json(self, tmp_path, fsdk_remote):
         tree = write_tree(tmp_path / "ps-printer-app", remote=fsdk_remote)
@@ -397,6 +482,19 @@ class TestMain:
     def test_no_input_exits_two(self, capsys):
         assert main([]) == 2
         assert "nothing to check" in capsys.readouterr().err
+
+    def test_a_repo_name_that_is_a_path_is_refused_before_cloning(self, capsys):
+        assert main(["--repo", "../elsewhere", "--no-fetch"]) == 1
+        assert "is not a repository name" in capsys.readouterr().err
+
+    def test_an_inherited_preset_is_noted_on_stderr(self, tmp_path, fsdk_remote, capsys):
+        tree = write_tree(
+            tmp_path / "ps-printer-app",
+            remote=fsdk_remote,
+            renovate={"extends": ["local>projectbluefin/renovate-config"]},
+        )
+        assert main([str(tree), "--fsdk-remote", str(fsdk_remote)]) == 0
+        assert "note: renovate.json extends" in capsys.readouterr().err
 
     def test_an_unreadable_config_exits_one(self, fork, capsys):
         tree, remote = fork

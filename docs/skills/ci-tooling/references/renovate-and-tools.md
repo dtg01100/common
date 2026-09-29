@@ -135,6 +135,20 @@ commit actually builds on, and whether exactly one thing proposes the junction
 (a missing `update-base.yml`, or a Renovate manager whose file pattern matches
 `elements/fsdk-containers.bst`, is a violation). It is fail-closed: an
 unreadable pin or a malformed `renovate.json` is a violation, never a pass.
+Renovate file patterns are read with Renovate's own syntax: `fileMatch` entries
+are always regexes, `managerFilePatterns` entries are globs unless wrapped in
+slashes.
+
+Two limits are stated rather than assumed away:
+
+- **it is a tool, not a gate.** Only its unit tests run in CI; no workflow runs
+  the check itself against a fork yet, so it is something to run by hand (or
+  from a fork's own CI) until one does;
+- **only a fork's own `renovate.json` is parsed.** `ps-printer-app` and
+  `gutenprint-printer-app` extend `local>projectbluefin/renovate-config`, so a
+  custom manager over the junction defined in a shared preset is invisible to
+  the check; an `extends` list is printed as a `note:` on stderr for that
+  reason.
 
 ```bash
 # Against local checkouts, or by cloning each fork's testing branch:

@@ -39,6 +39,13 @@ ref that is not a release-tagged FSDK pin, a failed fetch, an unreadable
 ``renovate.json`` or a missing updater workflow all exit non-zero, because
 "could not read the state" is never "the state is correct".
 
+Two limits are reported rather than assumed away. Only the fork's own
+``renovate.json`` is parsed, so a custom manager defined in an inherited preset
+(the forks extend ``local>projectbluefin/renovate-config``) is invisible here
+and an ``extends`` list is printed as a note. And nothing in CI runs this yet:
+it is a tool to run against a fork checkout, not a gate, until a workflow
+invokes it.
+
 Usage::
 
     scripts/check-printing-junction.py /path/to/ps-printer-app [...]
@@ -78,6 +85,7 @@ FORKS = {
 }
 
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
+REPO_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SIMPLE_REF = re.compile(r"^[ \t]*ref:[ \t]*(?P<value>\S+)[ \t]*$", re.MULTILINE)
 FSDK_REF = re.compile(
     r"^freedesktop-sdk-(?P<version>\S+?)-(?P<count>\d+)-g(?P<ref>[0-9a-f]{40})$"
@@ -174,8 +182,15 @@ def fsdk_pin(commit: str, remote: str) -> tuple[str, str]:
     return match.group("version"), match.group("ref")
 
 
-def renovate_file_patterns(config: dict) -> list[str]:
-    patterns: list[str] = []
+def renovate_file_patterns(config: dict) -> list[tuple[str, str]]:
+    """The file patterns of a ``renovate.json``, each tagged with its key.
+
+    The key matters, because the two keys do not share a syntax: ``fileMatch``
+    entries are always regexes, while ``managerFilePatterns`` (which replaced
+    it) is a glob unless the entry is wrapped in slashes. ``enabledManagers``
+    names no file pattern at all and is returned only for the record.
+    """
+    patterns: list[tuple[str, str]] = []
     managers = config.get("customManagers")
     if isinstance(managers, list):
         for manager in managers:
@@ -183,29 +198,38 @@ def renovate_file_patterns(config: dict) -> list[str]:
                 for key in ("managerFilePatterns", "fileMatch"):
                     value = manager.get(key)
                     if isinstance(value, list):
-                        patterns.extend(v for v in value if isinstance(v, str))
+                        patterns.extend((key, v) for v in value if isinstance(v, str))
     if isinstance(config.get("enabledManagers"), list):
         patterns.extend(
-            f"<manager:{manager}>" for manager in config["enabledManagers"] if isinstance(manager, str)
+            ("enabledManagers", manager)
+            for manager in config["enabledManagers"]
+            if isinstance(manager, str)
         )
     return patterns
 
 
-def pattern_matches_junction(pattern: str) -> bool:
-    """Whether a Renovate ``managerFilePatterns`` / ``fileMatch`` entry can
-    match ``elements/fsdk-containers.bst``.
+def pattern_matches_junction(pattern: str, regex: bool = False) -> bool:
+    """Whether a Renovate file pattern can match ``elements/fsdk-containers.bst``.
 
-    Both shapes exist in the wild and both are honoured: a glob
-    (``include/source-pins.yml``) and a regex wrapped in slashes
+    ``regex=True`` is the ``fileMatch`` syntax, where the entry is a bare regex
+    (``^elements/fsdk-containers\\.bst$``) and is never a glob. Otherwise the
+    entry is a ``managerFilePatterns`` one, which is a glob
+    (``include/source-pins.yml``) unless it is wrapped in slashes
     (``/^elements\\/fsdk-containers\\.bst$/``), which is how the printer forks
     write theirs.
     """
-    if pattern.startswith("/") and pattern.endswith("/") and len(pattern) > 1:
-        try:
-            return re.search(pattern[1:-1], JUNCTION) is not None
-        except re.error:
-            raise Failure(f"renovate.json file pattern {pattern!r} is not a regex") from None
-    return fnmatch.fnmatch(JUNCTION, pattern.lstrip("/"))
+    if regex:
+        expression: str | None = pattern
+    elif pattern.startswith("/") and pattern.endswith("/") and len(pattern) > 1:
+        expression = pattern[1:-1]
+    else:
+        expression = None
+    if expression is None:
+        return fnmatch.fnmatch(JUNCTION, pattern.lstrip("/"))
+    try:
+        return re.search(expression, JUNCTION) is not None
+    except re.error:
+        raise Failure(f"renovate.json file pattern {pattern!r} is not a regex") from None
 
 
 def renovate_manages_junction(config: dict) -> bool:
@@ -216,23 +240,46 @@ def renovate_manages_junction(config: dict) -> bool:
     ``github-actions`` name no file pattern, so they are reported for the record
     but never counted as a manager of a ``.bst`` element.
     """
-    for pattern in renovate_file_patterns(config):
-        if not pattern.startswith("<manager:") and pattern_matches_junction(pattern):
+    for key, pattern in renovate_file_patterns(config):
+        if key == "enabledManagers":
+            continue
+        if pattern_matches_junction(pattern, regex=key == "fileMatch"):
             return True
     return False
 
 
-def check_tree(tree: Path, oci_element: str, remote: str, fetch: bool = True) -> list[str]:
-    """Every contract violation of one fork checkout, as plain sentences."""
+def renovate_extends(config: dict) -> list[str]:
+    """The presets a ``renovate.json`` inherits from.
+
+    Only the fork's own file is parsed, so a custom manager defined in a shared
+    preset (the forks extend ``local>projectbluefin/renovate-config``) is
+    invisible to this check and is reported as a limit rather than a pass.
+    """
+    extends = config.get("extends")
+    if isinstance(extends, list):
+        return [preset for preset in extends if isinstance(preset, str)]
+    return []
+
+
+def check_tree(
+    tree: Path,
+    oci_element: str,
+    remote: str,
+    fetch: bool = True,
+    notes: list[str] | None = None,
+) -> list[str]:
+    """Every contract violation of one fork checkout, as plain sentences.
+
+    ``notes`` collects what the check cannot see rather than what it rejects:
+    a Renovate config that inherits presets may define a junction manager this
+    check never reads.
+    """
     violations: list[str] = []
 
     # 1. An immutable junction, with one proposal owner.
-    updater = tree / UPDATER
-    if not updater.is_file():
-        violations.append(
-            f"{tree.name} has no {UPDATER}: nothing proposes the shared junction, so a "
-            "new FSDK release would leave this image on a stale base indefinitely"
-        )
+    owners: list[str] = []
+    if (tree / UPDATER).is_file():
+        owners.append(UPDATER)
     renovate_config = tree / RENOVATE
     if renovate_config.is_file():
         try:
@@ -240,11 +287,26 @@ def check_tree(tree: Path, oci_element: str, remote: str, fetch: bool = True) ->
         except (OSError, ValueError) as error:
             raise Failure(f"cannot read {renovate_config}: {error}") from None
         if renovate_manages_junction(config):
-            violations.append(
-                f"{renovate_config.name} has a manager over {JUNCTION} and {UPDATER} also "
-                "proposes it: two proposal owners for one junction means duplicate or "
-                "racing updates; keep exactly one"
-            )
+            owners.append(f"a {renovate_config.name} manager")
+        elif notes is not None:
+            presets = renovate_extends(config)
+            if presets:
+                notes.append(
+                    f"{renovate_config.name} extends {', '.join(presets)}; only this file is "
+                    f"read, so a manager over {JUNCTION} defined in an inherited preset would "
+                    "not be seen here"
+                )
+    if not owners:
+        violations.append(
+            f"{tree.name} has no {UPDATER} and no Renovate manager over {JUNCTION}: nothing "
+            "proposes the shared junction, so a new FSDK release would leave this image on a "
+            "stale base indefinitely"
+        )
+    elif len(owners) > 1:
+        violations.append(
+            f"{' and '.join(owners)} both propose {JUNCTION}: two proposal owners for one "
+            "junction means duplicate or racing updates; keep exactly one"
+        )
 
     try:
         commit = junction_ref(tree)
@@ -304,6 +366,7 @@ def check_fork(
     remote: str,
     fetch: bool = True,
     oci_element: str | None = None,
+    notes: list[str] | None = None,
 ) -> list[str]:
     element = oci_element or FORKS.get(name) or infer_oci_element(tree)
     if not element:
@@ -311,10 +374,15 @@ def check_fork(
             f"cannot tell which element of {tree} carries the {LABEL_VERSION}/{LABEL_REF} "
             f"labels; pass --oci-element (known forks: {', '.join(sorted(FORKS))})"
         )
-    return check_tree(tree, element, remote, fetch=fetch)
+    return check_tree(tree, element, remote, fetch=fetch, notes=notes)
 
 
 def clone(name: str, ref: str, destination: Path) -> Path:
+    if not REPO_NAME.match(name):
+        raise Failure(
+            f"--repo {name!r} is not a repository name; it must match "
+            f"{REPO_NAME.pattern} (known forks: {', '.join(sorted(FORKS))})"
+        )
     url = f"https://github.com/projectbluefin/{name}.git"
     try:
         subprocess.run(
@@ -400,13 +468,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         total = 0
         for tree in trees:
             name = tree.resolve().name
+            notes: list[str] = []
             try:
                 violations = check_fork(
-                    name, tree, args.fsdk_remote, fetch=not args.no_fetch, oci_element=oci_element
+                    name,
+                    tree,
+                    args.fsdk_remote,
+                    fetch=not args.no_fetch,
+                    oci_element=oci_element,
+                    notes=notes,
                 )
             except Failure as failure:
                 print(f"check-printing-junction: {failure}", file=sys.stderr)
                 return 1
+            for note in notes:
+                print(f"{name}: note: {note}", file=sys.stderr)
             for violation in violations:
                 print(f"{name}: {violation}", file=sys.stderr)
             total += len(violations)
