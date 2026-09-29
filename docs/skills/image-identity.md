@@ -190,6 +190,17 @@ gh api repos/projectbluefin/server/contents/include/arch.yml \
 # restate them here; read docs/skills/image-registry.md instead.
 ```
 
+### `image-flavor` is identity, not (yet) a branding contract
+
+A flavor value is a machine-readable image attribute. It is **not** an
+implication that a surface should restyle itself. Any convention of the form
+"gaming images look different" is a product decision, not a schema detail,
+and needs a record under `docs/design/` before consumers act on it — see
+[`docs/design/gaming-ogc-branding.md`](../design/gaming-ogc-branding.md)
+(common#1156), which asks whether `image-flavor: gaming` should imply OGC
+branding. Until that record is filled in, treat the flavor as descriptive
+only: read it, do not style from it.
+
 ### Incident log
 
 | Date | What happened |
