@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-26",
+  "generated_at": "2026-09-29",
   "schema_version": "1.0",
   "skills": [
     {
@@ -241,6 +241,26 @@
       "description": "How to onboard a repo into the Project Bluefin factory model. The self-improvement mandate, what agents must do, and what is banned. Load when setting up a new repo or auditing factory compliance.",
       "version": "1.0",
       "last_updated": "2026-07-29",
+      "doc_type": "reference"
+    },
+    {
+      "id": "gnome-rounded-blur",
+      "name": "gnome-rounded-blur",
+      "one_line_purpose": "Keep the Blur My Shell GNOME defaults and the gnome-rounded-blur runtime library in agreement.",
+      "entry_point": "docs/skills/gnome-rounded-blur.md",
+      "category": "product",
+      "status": "active",
+      "tags": [
+        "gnome",
+        "blur-my-shell",
+        "rounded-blur",
+        "mutter",
+        "system_files",
+        "gsettings"
+      ],
+      "description": "Use when touching the Blur My Shell GSettings defaults, or when adding, removing or debugging the gnome-rounded-blur library that draws the rounded corners on dock and popup blur. Covers common's config layer versus the base image that installs it.",
+      "version": "1.0",
+      "last_updated": "2026-09-29",
       "doc_type": "reference"
     },
     {

@@ -37,6 +37,7 @@ repository's local catalog with `docs/skills/hive.md` as the preflight guard.
 | Improve factory automation or audit gaps | [`factory-improvement/SKILL.md`](skills/factory-improvement/SKILL.md) |
 | Onboard a new repo into the factory | [`factory-onboarding.md`](skills/factory-onboarding.md) |
 | Change a GNOME setting or dconf key | [`dconf-consistency.md`](skills/dconf-consistency.md) |
+| Change the Blur My Shell defaults or the rounded-blur library | [`gnome-rounded-blur.md`](skills/gnome-rounded-blur.md) |
 | Work on Bazaar config or hooks | [`bazaar.md`](skills/bazaar.md) |
 | Edit `system_files/shared/` or `bluefin/` | [`submodule-boundary.md`](skills/submodule-boundary.md) |
 | Touch any image reference or registry path | [`image-registry.md`](skills/image-registry.md) |
