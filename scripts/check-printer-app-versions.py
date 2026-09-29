@@ -75,17 +75,26 @@ def load_contract(path=DEFAULT_CONTRACT):
 
 
 def family_grammar(entry):
-    """Compile a family grammar, raising ValueError when it is not a regex."""
+    """Compile a family grammar.
+
+    Raises ``re.error`` when the recorded grammar is not a valid regular
+    expression, and ``KeyError`` when the entry records no grammar at all.
+    """
     return re.compile(entry["grammar"])
 
 
-def parse_version(entry, version):
+def parse_version(entry, version, grammar=None):
     """Return the named components of ``version`` under ``entry``'s grammar.
+
+    ``grammar`` may be an already compiled pattern, so callers that check many
+    versions against one family compile it once.
 
     Raises ValueError when the version does not match the family grammar or
     when a captured group is empty.
     """
-    match = family_grammar(entry).match(version)
+    if grammar is None:
+        grammar = family_grammar(entry)
+    match = grammar.match(version)
     if not match:
         raise ValueError(
             f"{version!r} does not match the {entry['family']} grammar "
@@ -101,13 +110,14 @@ def check_family(entry):
     for field in REQUIRED_FIELDS:
         if field not in entry:
             findings.append(finding("error", family, f"missing required field {field!r}"))
+    if findings:
+        return findings
 
-    if not findings:
-        try:
-            family_grammar(entry)
-        except re.error as exc:
-            findings.append(finding("error", family, f"invalid grammar: {exc}"))
-            return findings
+    try:
+        grammar = family_grammar(entry)
+    except re.error as exc:
+        findings.append(finding("error", family, f"invalid grammar: {exc}"))
+        return findings
 
     if entry.get("upstream_form") not in UPSTREAM_FORMS:
         findings.append(
@@ -128,7 +138,7 @@ def check_family(entry):
 
     for tag in entry.get("published_tags", []):
         try:
-            parse_version(entry, tag)
+            parse_version(entry, tag, grammar)
         except ValueError as exc:
             findings.append(finding("error", family, f"published tag invalid: {exc}"))
 
@@ -148,7 +158,7 @@ def check_family(entry):
         )
     else:
         try:
-            parse_version(entry, examples["upstream_release"])
+            parse_version(entry, examples["upstream_release"], grammar)
         except ValueError as exc:
             findings.append(
                 finding("error", family, f"examples.upstream_release invalid: {exc}")
@@ -156,7 +166,7 @@ def check_family(entry):
 
     if "rebuild" in examples:
         try:
-            parse_version(entry, examples["rebuild"])
+            parse_version(entry, examples["rebuild"], grammar)
         except ValueError as exc:
             findings.append(finding("error", family, f"examples.rebuild invalid: {exc}"))
         upstream_release = examples.get("upstream_release")
@@ -249,8 +259,14 @@ def check_candidate(contract, family, version):
     entry = find_family(contract, family)
     if entry is None:
         return [finding("error", family, f"unknown family {family!r}")]
+    if "grammar" not in entry:
+        return [finding("error", family, "missing required field 'grammar'")]
     try:
-        parse_version(entry, version)
+        grammar = family_grammar(entry)
+    except re.error as exc:
+        return [finding("error", family, f"invalid grammar: {exc}")]
+    try:
+        parse_version(entry, version, grammar)
     except ValueError as exc:
         return [finding("error", family, str(exc))]
     return []
@@ -281,7 +297,9 @@ def main(argv=None):
         print(f"error: cannot read version contract: {exc}", file=sys.stderr)
         return 1
 
-    if args.family:
+    if args.family or args.candidate:
+        if not args.family:
+            parser.error("--candidate requires --family")
         if not args.candidate:
             parser.error("--family requires --candidate")
         findings = check_candidate(contract, args.family, args.candidate)

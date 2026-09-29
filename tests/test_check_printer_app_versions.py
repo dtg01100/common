@@ -109,6 +109,22 @@ class TestCheckFamily:
         errors = _severities(check_family(_entry(grammar="^(unclosed")), "error")
         assert any("invalid grammar" in item["message"] for item in errors)
 
+    def test_invalid_grammar_with_a_missing_field_reports_the_missing_field(self):
+        entry = _entry(grammar="^(unclosed")
+        del entry["version_source"]
+        findings = check_family(entry)
+        assert [item["message"] for item in findings] == [
+            "missing required field 'version_source'"
+        ]
+
+    def test_missing_grammar_reports_the_missing_field(self):
+        entry = _entry()
+        del entry["grammar"]
+        findings = check_family(entry)
+        assert [item["message"] for item in findings] == [
+            "missing required field 'grammar'"
+        ]
+
     def test_unknown_upstream_form(self):
         errors = _severities(check_family(_entry(upstream_form="whatever")), "error")
         assert any("upstream_form" in item["message"] for item in errors)
@@ -238,6 +254,17 @@ class TestCheckCandidate:
         results = check_candidate({"families": [_entry()]}, "nope", "1.2.3-1")
         assert any("unknown family" in item["message"] for item in results)
 
+    def test_family_with_an_invalid_grammar_reports_it(self):
+        contract = {"families": [_entry(grammar="^(unclosed")]}
+        results = check_candidate(contract, "example-printer-app", "1.2.3-1")
+        assert any("invalid grammar" in item["message"] for item in results)
+
+    def test_family_without_a_grammar_reports_it(self):
+        entry = _entry()
+        del entry["grammar"]
+        results = check_candidate({"families": [entry]}, "example-printer-app", "1.2.3-1")
+        assert any("grammar" in item["message"] for item in results)
+
 
 # ---------------------------------------------------------------------------
 # load_contract
@@ -318,6 +345,10 @@ class TestMain:
     def test_candidate_mode_requires_candidate(self):
         with pytest.raises(SystemExit):
             main(["--contract", str(CONTRACT_PATH), "--family", "hplip-printer-app"])
+
+    def test_candidate_mode_requires_family(self):
+        with pytest.raises(SystemExit):
+            main(["--contract", str(CONTRACT_PATH), "--candidate", "3.26.5"])
 
     def test_unreadable_contract_exits_one(self, capsys):
         rc = main(["--contract", "/nonexistent/contract.json"])
