@@ -144,11 +144,12 @@ slashes.
 
 Three limits are stated rather than assumed away:
 
-- **the check itself is not a gate.** Its unit tests run in
-  `.github/workflows/unit-tests.yml`'s "scripts and config validators" step, so
-  a regression in `scripts/check-printing-junction.py` fails CI here; the
-  check's own verdict over the three forks still runs only by hand (or from a
-  fork's own CI), because no workflow in this repository clones them;
+- **it is a tool, not a gate.** Its unit tests are registered in `just test`,
+  but `.github/workflows/unit-tests.yml` names its pytest files one by one and
+  does not name this suite, so neither the suite nor the check itself runs in
+  this repository's CI; adding `tests/test_check_printing_junction.py` to that
+  workflow's "scripts and config validators" step closes half the gap, and
+  until someone does, run both by hand (or from a fork's own CI);
 - **only a fork's own `renovate.json` is parsed.** `ps-printer-app` and
   `gutenprint-printer-app` extend `local>projectbluefin/renovate-config`, so a
   custom manager over the junction defined in a shared preset is invisible to
