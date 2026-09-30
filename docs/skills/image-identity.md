@@ -1,7 +1,7 @@
 ---
 name: image-identity
 version: "1.0"
-last_updated: "2026-09-23"
+last_updated: "2026-09-29"
 id: image-identity
 one_line_purpose: Decide who owns image-identity and variant metadata across the org.
 entry_point: docs/skills/image-identity.md

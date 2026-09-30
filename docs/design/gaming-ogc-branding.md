@@ -100,7 +100,7 @@ like any other.
 | Panel icon (ChairLift / Livery) | yes | Already defaulted to OGC by chairlift#194 |
 | Files (Nautilus) icon | yes | Would change every file-manager surface; highest visibility |
 | App-grid / dash glyph | yes | Smaller surface, easier to justify |
-| Wallpaper | no — different mechanism | Wallpaper is selected by a user-setup hook (`system_files/bluefin/usr/share/ublue-os/user-setup.hooks.d/20-dynamic-wallpaper.sh`), not by the `IsGaming()` runtime check; it does not read `image-flavor` today, so Option A would have to add that keying |
+| Wallpaper | no — different mechanism | A user-setup hook (`system_files/bluefin/usr/share/ublue-os/user-setup.hooks.d/20-dynamic-wallpaper.sh`) enables the `bluefin-dynamic-wallpaper.timer` and calls `/usr/libexec/bluefin-dynamic-wallpaper`; the actual selection logic lives in that libexec script, not in the hook. Neither file reads `image-flavor` today, so Option A would have to add flavor keying to `/usr/libexec/bluefin-dynamic-wallpaper` (or replace it). |
 | Installer / plymouth | build-time, not runtime | Cross-repo: installer and plymouth themes live outside common; a decision here implies work there |
 
 Overriding a user's explicit mark choice is **not** on this list. Whatever
