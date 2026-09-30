@@ -90,10 +90,12 @@ open and live in the appliance repos:
   repo's image epic and PR, not in `common`; this PR does not collect it. If
   criterion 2 is needed before the issue can close, the owner is whichever
   appliance epic the recorded check URLs land in.
-- **Criterion 4** — PS public promotion stays blocked on
-  [ps-printer-app#27](https://github.com/projectbluefin/ps-printer-app/issues/27)
-  (security sign-off). Source and CI verification of the pin do not authorize
-  a release; see [printer-app-promotion.md](./printer-app-promotion.md).
+- **Criterion 4** — PS public promotion stays blocked on the security sign-off
+  tracked at [ps-printer-app#27](https://github.com/projectbluefin/ps-printer-app/issues/27)
+  (closed 2026-09-29; the tag-hold ruleset and the documented security review
+  gate remain in force until a human clears the release in the appliance repo).
+  Source and CI verification of the pin do not authorize a release; see
+  [printer-app-promotion.md](./printer-app-promotion.md).
 
 ## What remains (not `common` code)
 
@@ -127,19 +129,41 @@ for r in ps-printer-app hplip-printer-app gutenprint-printer-app ghostscript-pri
 done
 
 # 2. the nested FSDK source identity the pinned commit actually builds on
+#    (head -8 to reach the ref: line — track:/ref: are line 5 / line 7 at 8a02f5e;
+#    grep is the durable shape, head is the human-readable check)
 gh api "repos/projectbluefin/fsdk-containers/contents/elements/freedesktop-sdk.bst?ref=<pinned>" \
-  --jq .content | base64 -d | head -5
+  --jq .content | base64 -d | grep -E 'track:|ref:'
 
-# 3. no preview/branch-only pin anywhere in the appliance trees
+# 3. no preview/branch-only pin anywhere in the appliance trees.
+#    A grep for `ref:` lines that are NOT a full 40-char SHA catches any
+#    floating / branch / tag pin (the previous `grep '^elements' | grep -v '\.bst$'`
+#    only listed directory names and verified nothing).
 for r in ps-printer-app hplip-printer-app gutenprint-printer-app ghostscript-printer-app; do
   gh api "repos/projectbluefin/$r/git/trees/testing?recursive=1" --jq '.tree[].path' \
-    | grep '^elements' | grep -v '\.bst$'
+    | grep '\.bst$' \
+    | while read -r p; do
+        gh api "repos/projectbluefin/$r/contents/$p?ref=testing" --jq .content \
+          | base64 -d | grep -h '^[[:space:]]*ref:' | grep -vE '[0-9a-f]{40}'
+      done
 done
 
-# 4. the CUPS owner is singular in each repo
+# 4. the CUPS owner is singular in each repo.
+#    The previous read of `elements/printer-app/core-stack.bst` 404s in hplip-printer-app
+#    (it uses `runtime-stack.bst`); in the others it returns a comment or an
+#    unrelated element. The real CUPS consumers are the cups*.bst refs under
+#    `fsdk-containers.bst:freedesktop-sdk.bst:components/`. Grep every element
+#    for `cups` and assert each hit is prefixed by `fsdk-containers.bst:` —
+#    only one such path means one CUPS owner.
 for r in ps-printer-app hplip-printer-app gutenprint-printer-app ghostscript-printer-app; do
-  gh api "repos/projectbluefin/$r/contents/elements/printer-app/core-stack.bst?ref=testing" \
-    --jq .content | base64 -d | grep -i cups
+  gh api "repos/projectbluefin/$r/git/trees/testing?recursive=1" --jq '.tree[].path' \
+    | grep '\.bst$' \
+    | while read -r p; do
+        body=$(gh api "repos/projectbluefin/$r/contents/$p?ref=testing" --jq .content | base64 -d)
+        cups_hits=$(echo "$body" | grep -i 'cups' || true)
+        [ -z "$cups_hits" ] && continue
+        # every cups reference must resolve through fsdk-containers.bst:freedesktop-sdk.bst:components/cups*.bst
+        echo "$cups_hits" | grep -vE 'fsdk-containers\.bst:freedesktop-sdk\.bst:components/cups.*\.bst'
+      done
 done
 ```
 
