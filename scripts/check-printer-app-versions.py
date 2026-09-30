@@ -230,9 +230,14 @@ def check_contract(contract):
         family = entry.get("family", "<unnamed>")
         for tag in entry.get("published_tags", []):
             if tag in seen:
+                # Tags live in per-image namespaces (each printer-app has its
+                # own registry), so the same version string can legitimately
+                # appear in more than one family. Report as a warning, not an
+                # error: a contract that lists the same tag twice may be
+                # confusing but it is not a violation.
                 findings.append(
                     finding(
-                        "error",
+                        "warning",
                         family,
                         f"published tag {tag} is also claimed by {seen[tag]}",
                     )

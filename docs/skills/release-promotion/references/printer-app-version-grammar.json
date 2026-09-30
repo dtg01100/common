@@ -1,9 +1,13 @@
 {
   "$comment": [
     "Machine-readable record of the four OCI Printer Application version forms.",
-    "Every field here is transcribed from the enforcement in each printer-app",
-    "repo's .github/workflows/registry-actions.yml and its version source file,",
-    "not from memory. Narrative and evidence:",
+    "The grammar (the regex) and published_tags are observed/inferred from each",
+    "printer-app repo's stable branch (VERSION file, existing release tags); only",
+    "the version_source and tag-equality enforcement are transcribed from the",
+    "repo's .github/workflows/registry-actions.yml. Ghostscript's grammar is",
+    "inferred from existing tags (10.07.1-1, 10.07.1-2): the publish workflow",
+    "verifies the tag equals v$VERSION and points at a stable commit, but it",
+    "does not validate the version shape itself. Narrative and evidence:",
     "docs/skills/release-promotion/references/printer-app-version-semantics.md",
     "Validator: scripts/check-printer-app-versions.py (--strict fails on findings).",
     "This file records observed/agreed semantics; it is not itself a policy change."
@@ -20,7 +24,7 @@
       "rebuild_slot": "shared",
       "rebuild_slot_note": "The trailing number is the packaging revision; there is no separate rebuild counter, so an FSDK-only rebuild bumps the same field. Only Gutenprint carries a distinct rebuild counter (its optional .N suffix).",
       "version_source": "VERSION (single line, the only version source)",
-      "enforcement": "registry-actions.yml metadata step: release tag must equal v$VERSION and point at a commit on stable; image labels org.opencontainers.image.version are checked against $VERSION after push; re-pushing an existing tag is refused.",
+      "enforcement": "registry-actions.yml metadata step: release tag must equal v$VERSION and point at a commit on stable; image labels org.opencontainers.image.version are checked against $VERSION after push; re-pushing an existing tag is refused. The grammar below is inferred from existing tags (10.07.1-1, 10.07.1-2); the workflow does not validate the version shape itself.",
       "published_tags": ["10.07.1-1", "10.07.1-2"],
       "examples": {
         "upstream_release": "10.07.2-1",

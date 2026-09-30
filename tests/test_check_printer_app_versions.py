@@ -211,15 +211,20 @@ class TestCheckFamily:
 # ---------------------------------------------------------------------------
 
 class TestCheckContract:
-    def test_tag_cannot_be_claimed_by_two_families(self):
+    def test_a_duplicate_tag_across_families_is_a_warning_not_an_error(self):
         contract = {
             "families": [
                 _entry(family="a", published_tags=["1.2.3-1"]),
                 _entry(family="b", published_tags=["1.2.3-1"]),
             ]
         }
-        errors = _severities(check_contract(contract), "error")
-        assert any("also claimed by a" in item["message"] for item in errors)
+        findings = check_contract(contract)
+        assert _severities(findings, "error") == []
+        assert any(
+            "also claimed by a" in item["message"]
+            and item["severity"] == "warning"
+            for item in findings
+        )
 
     def test_distinct_tags_are_fine(self):
         contract = {

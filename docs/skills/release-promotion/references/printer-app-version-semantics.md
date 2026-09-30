@@ -35,14 +35,19 @@ it does not decide them (that is a maintainer decision, see
 
 ## Per-family forms as enforced today (2026-09-29)
 
-Each row is transcribed from the family's own
-`.github/workflows/registry-actions.yml` metadata step and its version source
-file, not from memory. Re-derive with the recipe in
+The grammar (the regex) for each family and the published_tags column are
+**observed/inferred from each printer-app repo's `stable` branch** (the
+`VERSION` file and existing release tags); only the version source and the
+tag-equality / stable-ancestry enforcement are transcribed from each repo's
+`.github/workflows/registry-actions.yml`. Ghostscript's grammar is inferred
+from its existing tags (`10.07.1-1`, `10.07.1-2`) — its publish workflow
+verifies the release tag equals `v$VERSION` and points at a stable commit,
+but does not validate the version shape itself. Re-derive with the recipe in
 [Re-derivation recipe](#re-derivation-recipe) before relying on it.
 
 | Family | Version form | Version source | Upstream part | Rebuild slot | Published tags |
 |---|---|---|---|---|---|
-| Ghostscript | `10.07.1-2` | `VERSION` file | Ghostscript `10.07.1` | **shared** with the packaging revision | `10.07.1-1`, `10.07.1-2` |
+| Ghostscript | `10.07.1-2` (grammar inferred from tags) | `VERSION` file | Ghostscript `10.07.1` | **shared** with the packaging revision | `10.07.1-1`, `10.07.1-2` |
 | HPLIP | `3.26.4` | `VERSION` file, cross-checked against `# source-tag:` in `elements/printer-app/hplip.bst` | HPLIP `3.26.4` | **none** | `3.26.4` |
 | Gutenprint | `5.3.6-4.1` | `include/source-pins.yml` (`gutenprint-version`) | Gutenprint `5.3.6` + Debian revision `4` | **`.N` suffix** — documented in the repo's own workflow as "an OCI-only rebuild of the same Debian revision, because immutable registry tags can never be republished" | `5.3.6-4`, `5.3.6-4.1` |
 | PostScript | `20240504-20` | `VERSION` file, staged by `elements/printer-app/version.bst` | foomatic-db snapshot date `20240504` (calendar date, not semver) | **shared** with the packaging revision | none — release held on [ps-printer-app#27](https://github.com/projectbluefin/ps-printer-app/issues/27) |
