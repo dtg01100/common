@@ -33,7 +33,7 @@ by `scripts/check-printer-app-versions.py`. The check reports the gaps below;
 it does not decide them (that is a maintainer decision, see
 [Open decision](#open-decision-maintainer)).
 
-## Per-family forms as enforced today (2026-09-29)
+## Per-family forms as observed and inferred (2026-09-29)
 
 The grammar (the regex) for each family and the published_tags column are
 **observed/inferred from each printer-app repo's `stable` branch** (the
