@@ -131,8 +131,8 @@ done
 After editing the contract, run the check and the tests:
 
 ```bash
-python3 scripts/check-printer-app-versions.py            # findings reported, exit 0
-python3 scripts/check-printer-app-versions.py --strict   # findings are failures
+python3 scripts/check-printer-app-versions.py            # findings and warnings reported, exit 0
+python3 scripts/check-printer-app-versions.py --strict   # findings and warnings are failures
 python3 -m pytest tests/test_check_printer_app_versions.py
 ```
 

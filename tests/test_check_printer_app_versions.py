@@ -319,6 +319,40 @@ class TestMain:
         payload = json.loads(capsys.readouterr().out)
         assert payload["errors"] == []
         assert len(payload["findings"]) == 3
+        assert payload["warnings"] == []
+
+    def test_json_output_reports_warnings(self, tmp_path, capsys):
+        path = tmp_path / "contract.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "families": [
+                        _entry(family="a", published_tags=["1.2.3-1"]),
+                        _entry(family="b", published_tags=["1.2.3-1"]),
+                    ]
+                }
+            )
+        )
+        assert main(["--contract", str(path), "--format", "json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["errors"] == []
+        assert [item["severity"] for item in payload["warnings"]] == ["warning"]
+        assert "also claimed by a" in payload["warnings"][0]["message"]
+
+    def test_strict_fails_on_warnings_alone(self, tmp_path):
+        path = tmp_path / "contract.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "families": [
+                        _entry(family="a", published_tags=["1.2.3-1"]),
+                        _entry(family="b", published_tags=["1.2.3-1"]),
+                    ]
+                }
+            )
+        )
+        assert main(["--contract", str(path)]) == 0
+        assert main(["--contract", str(path), "--strict"]) == 1
 
     def test_candidate_mode(self, capsys):
         rc = main(

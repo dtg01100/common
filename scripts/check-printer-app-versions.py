@@ -18,7 +18,7 @@ Checks:
     with its packaging revision (ambiguous, but at least expressible).
 
 Exit status: 0 when there are no errors, 1 when there is at least one error,
-or when ``--strict`` is given and there is at least one finding.
+or when ``--strict`` is given and there is at least one finding or warning.
 
 Usage:
     python3 scripts/check-printer-app-versions.py
@@ -290,7 +290,7 @@ def main(argv=None):
     parser.add_argument("--contract", default=str(DEFAULT_CONTRACT))
     parser.add_argument("--format", choices=("text", "json"), default="text")
     parser.add_argument(
-        "--strict", action="store_true", help="treat findings as failures"
+        "--strict", action="store_true", help="treat findings and warnings as failures"
     )
     parser.add_argument("--family", help="check a single family")
     parser.add_argument("--candidate", help="version string to check with --family")
@@ -313,11 +313,17 @@ def main(argv=None):
 
     errors = [item for item in findings if item["severity"] == "error"]
     soft = [item for item in findings if item["severity"] == "finding"]
+    warnings = [item for item in findings if item["severity"] == "warning"]
 
     if args.format == "json":
         print(
             json.dumps(
-                {"errors": errors, "findings": soft, "strict": bool(args.strict)},
+                {
+                    "errors": errors,
+                    "findings": soft,
+                    "warnings": warnings,
+                    "strict": bool(args.strict),
+                },
                 indent=2,
             )
         )
@@ -327,13 +333,14 @@ def main(argv=None):
         else:
             print("printer-app version contract: OK")
         print(
-            f"{len(errors)} error(s), {len(soft)} finding(s)"
+            f"{len(errors)} error(s), {len(soft)} finding(s), "
+            f"{len(warnings)} warning(s)"
             f"{' (strict)' if args.strict else ''}"
         )
 
     if errors:
         return 1
-    if soft and args.strict:
+    if (soft or warnings) and args.strict:
         return 1
     return 0
 
