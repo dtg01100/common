@@ -30,7 +30,7 @@ labels in each repo's `elements/oci/<app>.bst` must state the FSDK commit that
 the *pinned* `fsdk-containers` commit actually builds on, so the published
 image carries the same source identity as the junction.
 
-## Verified baseline as of 2026-09-30
+## Verified baseline as of 2026-09-29
 
 All four repos, on **both** `testing` and `stable`, carry the same junction
 commit and the same label pair:
@@ -39,7 +39,7 @@ commit and the same label pair:
 |---|---|---|---|---|
 | [`ps-printer-app`](https://github.com/projectbluefin/ps-printer-app) | `ec0cfff` | `b1dfb3b` | `8a02f5e18b6d89c5558d2371212a5489e86c3ea2` | `26.08.1` / `b02b59ffe19a49a402f357fd5fcb1d552ebc50d7` |
 | [`hplip-printer-app`](https://github.com/projectbluefin/hplip-printer-app) | `12912f5` | `b483227` | `8a02f5e18b6d89c5558d2371212a5489e86c3ea2` | `26.08.1` / `b02b59ffe19a49a402f357fd5fcb1d552ebc50d7` |
-| [`gutenprint-printer-app`](https://github.com/projectbluefin/gutenprint-printer-app) | `1d4198d` | `64bc5bc` | `8a02f5e18b6d89c5558d2371212a5489e86c3ea2` | `26.08.1` / `b02b59ffe19a49a402f357fd5fcb1d552ebc50d7` |
+| [`gutenprint-printer-app`](https://github.com/projectbluefin/gutenprint-printer-app) | `b6816e0` | `64bc5bc` | `8a02f5e18b6d89c5558d2371212a5489e86c3ea2` | `26.08.1` / `b02b59ffe19a49a402f357fd5fcb1d552ebc50d7` |
 | [`ghostscript-printer-app`](https://github.com/projectbluefin/ghostscript-printer-app) | `b72e7b9` | `f667ca7` | `8a02f5e18b6d89c5558d2371212a5489e86c3ea2` | `26.08.1` / `b02b59ffe19a49a402f357fd5fcb1d552ebc50d7` |
 
 Nested source identity, read from the pinned commit rather than from `main`:
