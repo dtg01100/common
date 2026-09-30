@@ -224,6 +224,24 @@ class TestOciLabels:
         with pytest.raises(Failure, match="not a full commit"):
             oci_labels(tree, "elements/oci/ps-printer-app.bst")
 
+    def test_reads_double_quoted_labels(self, fork):
+        tree, _ = fork
+        (tree / "elements/oci/ps-printer-app.bst").write_text(
+            f"kind: oci-image\n        Labels:\n"
+            f'              "io.projectbluefin.fsdk.version": "{FSDK_VERSION}"\n'
+            f'              "io.projectbluefin.fsdk.ref": "{FSDK_COMMIT}"\n'
+        )
+        assert oci_labels(tree, "elements/oci/ps-printer-app.bst") == (FSDK_VERSION, FSDK_COMMIT)
+
+    def test_reads_bare_labels(self, fork):
+        tree, _ = fork
+        (tree / "elements/oci/ps-printer-app.bst").write_text(
+            f"kind: oci-image\n        Labels:\n"
+            f"              io.projectbluefin.fsdk.version: {FSDK_VERSION}\n"
+            f"              io.projectbluefin.fsdk.ref: {FSDK_COMMIT}\n"
+        )
+        assert oci_labels(tree, "elements/oci/ps-printer-app.bst") == (FSDK_VERSION, FSDK_COMMIT)
+
     def test_rejects_a_missing_element(self, fork):
         tree, _ = fork
         with pytest.raises(Failure, match="does not exist"):

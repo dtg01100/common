@@ -97,7 +97,18 @@ BARE_REF = re.compile(r"^(?P<value>[^\s\"'#]+)(?:[ \t]+#.*)?$")
 FSDK_REF = re.compile(
     r"^freedesktop-sdk-(?P<version>\S+?)-(?P<count>\d+)-g(?P<ref>[0-9a-f]{40})$"
 )
-LABEL = r"^[ \t]*'io\.projectbluefin\.fsdk\.%s':[ \t]*'(?P<value>[^']*)'"
+# A label line, however YAML quotes the key and the value: both may be single
+# quoted, double quoted, or bare, since all three spell the same mapping entry.
+LABEL = (
+    r"^[ \t]*(?P<kq>[\"']?)io\.projectbluefin\.fsdk\.%s(?P=kq)[ \t]*:[ \t]*"
+    r"(?:(?P<vq>[\"'])(?P<quoted>[^\"']*)(?P=vq)|(?P<bare>[^\s\"'#]+))"
+)
+
+
+def label_value(match: re.Match[str]) -> str:
+    """The value a LABEL match captured, whichever quoting style it used."""
+    quoted = match.group("quoted")
+    return quoted if quoted is not None else match.group("bare")
 
 
 class Failure(Exception):
@@ -170,7 +181,7 @@ def oci_labels(tree: Path, oci_element: str) -> tuple[str, str]:
         match = re.search(pattern, text, re.MULTILINE)
         if not match:
             raise Failure(f"{oci_element} does not label io.projectbluefin.fsdk.{key}")
-        values[key] = match.group("value")
+        values[key] = label_value(match)
     if not COMMIT.match(values["ref"]):
         raise Failure(
             f"{oci_element} labels io.projectbluefin.fsdk.ref as "
@@ -186,7 +197,18 @@ def fsdk_pin(commit: str, remote: str) -> tuple[str, str]:
         try:
             subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
             subprocess.run(
-                ["git", "-C", str(repo), "fetch", "-q", "--depth", "1", remote, commit],
+                [
+                    "git",
+                    "-C",
+                    str(repo),
+                    "fetch",
+                    "-q",
+                    "--depth",
+                    "1",
+                    "--end-of-options",
+                    remote,
+                    commit,
+                ],
                 check=True,
                 capture_output=True,
             )
