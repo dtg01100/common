@@ -77,13 +77,22 @@ off. If you ever lock one, follow the two-file rule in
 (`system_files/bluefin/etc/dconf/db/distro.d/locks/01-bluefin-locked-settings`)
 must be edited in the same PR as the override.
 
+> **Precedence on Fedora bluefin (note, not a fault of this PR).** `ublue-os/bluefin`
+> also ships `zz1-bluefin-extensions.gschema.override` and a dconf database entry
+> in `distro.d/05-blur-my-shell-extension` that set `popup blur=false`. Both
+> sort **after** this `zz0-…` override and the dconf database wins over schema
+> defaults, so the `true` written here is currently masked on Fedora bluefin
+> until those upstream overrides are removed in the same release. On
+> `bluefin-lts` (no `zz1`, no `distro.d/05-…`) and on `dakota` (the library is
+> not yet built, see below), this override is the effective value.
+
 ## Verifying locally
 
 ```bash
 # On a running bluefin / bluefin-lts image
 rpm -q gnome-rounded-blur
 ls -l /usr/lib64/libgnome-rounded-blur.so*
-gsettings get org.gnome.shell.extensions.blur-my-shell popup blur
+gsettings get org.gnome.shell.extensions.blur-my-shell.popup blur
 ```
 
 If `rpm -q` fails, the blur will render without rounded corners — that is a
