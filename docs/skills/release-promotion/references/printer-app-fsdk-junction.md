@@ -72,8 +72,15 @@ must not be promoted. That is no longer the state of the tree:
   [#39](https://github.com/projectbluefin/ghostscript-printer-app/pull/39) was
   **closed unmerged** and its content landed through #44; the OCI CI cutover
   [#40](https://github.com/projectbluefin/ghostscript-printer-app/pull/40) is
-  **merged**. CUPS has exactly one provider — `fsdk-containers:printing/base.bst`
-  — in all four repos. The per-repo `patches/cups-dnssd-backend-socket-only.patch`
+  **merged**. CUPS has exactly one *owner* in all four repos — the shared
+  `fsdk-containers.bst` junction. Every CUPS dependency resolves through it,
+  either as `fsdk-containers.bst:printing/base.bst` (the printing stack all
+  four repos consume) or as a nested FSDK component under
+  `fsdk-containers.bst:freedesktop-sdk.bst:components/` (`cups.bst`,
+  `cups-daemon-only.bst`, `cups-filters.bst`, `libcupsfilters.bst`, used
+  directly by hplip, gutenprint and ghostscript driver elements). No repo
+  builds CUPS locally or reaches it through a second junction. The per-repo
+  `patches/cups-dnssd-backend-socket-only.patch`
   copies are referenced only by the retained legacy `snap/`/`rockcraft/`
   recipes for driver provenance; no BuildStream element in the forks applies
   them, and `fsdk-containers` owns the equivalent
@@ -129,15 +136,12 @@ for r in ps-printer-app hplip-printer-app gutenprint-printer-app ghostscript-pri
 done
 
 # 2. the nested FSDK source identity the pinned commit actually builds on
-#    (head -8 to reach the ref: line — track:/ref: are line 5 / line 7 at 8a02f5e;
-#    grep is the durable shape, head is the human-readable check)
 gh api "repos/projectbluefin/fsdk-containers/contents/elements/freedesktop-sdk.bst?ref=<pinned>" \
   --jq .content | base64 -d | grep -E 'track:|ref:'
 
 # 3. no preview/branch-only pin anywhere in the appliance trees.
-#    A grep for `ref:` lines that are NOT a full 40-char SHA catches any
-#    floating / branch / tag pin (the previous `grep '^elements' | grep -v '\.bst$'`
-#    only listed directory names and verified nothing).
+#    Any `ref:` line that is not a full 40-char SHA is a floating / branch /
+#    tag pin; the loop prints only those, so empty output means clean.
 for r in ps-printer-app hplip-printer-app gutenprint-printer-app ghostscript-printer-app; do
   gh api "repos/projectbluefin/$r/git/trees/testing?recursive=1" --jq '.tree[].path' \
     | grep '\.bst$' \
@@ -148,22 +152,31 @@ for r in ps-printer-app hplip-printer-app gutenprint-printer-app ghostscript-pri
 done
 
 # 4. the CUPS owner is singular in each repo.
-#    The previous read of `elements/printer-app/core-stack.bst` 404s in hplip-printer-app
-#    (it uses `runtime-stack.bst`); in the others it returns a comment or an
-#    unrelated element. The real CUPS consumers are the cups*.bst refs under
-#    `fsdk-containers.bst:freedesktop-sdk.bst:components/`. Grep every element
-#    for `cups` and assert each hit is prefixed by `fsdk-containers.bst:` —
-#    only one such path means one CUPS owner.
+#    Look only at dependency entries (`  - <element>.bst` list items), never at
+#    comments or build-command lines, which mention `cups` paths constantly.
+#    Accepted CUPS-providing dependencies — all reached through the one
+#    `fsdk-containers.bst` junction:
+#      fsdk-containers.bst:printing/base.bst
+#      fsdk-containers.bst:freedesktop-sdk.bst:components/cups.bst
+#      fsdk-containers.bst:freedesktop-sdk.bst:components/cups-daemon-only.bst
+#      fsdk-containers.bst:freedesktop-sdk.bst:components/cups-filters.bst
+#      fsdk-containers.bst:freedesktop-sdk.bst:components/libcupsfilters.bst
+#    Local driver elements (e.g. printer-app/dymo-cups-drivers.bst) merely
+#    consume CUPS and are excluded. Any other hit is a second CUPS owner.
+accepted='^fsdk-containers\.bst:(printing/base\.bst|freedesktop-sdk\.bst:components/(cups|cups-daemon-only|cups-filters|libcupsfilters)\.bst)$'
 for r in ps-printer-app hplip-printer-app gutenprint-printer-app ghostscript-printer-app; do
+  echo "== $r"
   gh api "repos/projectbluefin/$r/git/trees/testing?recursive=1" --jq '.tree[].path' \
     | grep '\.bst$' \
     | while read -r p; do
-        body=$(gh api "repos/projectbluefin/$r/contents/$p?ref=testing" --jq .content | base64 -d)
-        cups_hits=$(echo "$body" | grep -i 'cups' || true)
-        [ -z "$cups_hits" ] && continue
-        # every cups reference must resolve through fsdk-containers.bst:freedesktop-sdk.bst:components/cups*.bst
-        echo "$cups_hits" | grep -vE 'fsdk-containers\.bst:freedesktop-sdk\.bst:components/cups.*\.bst'
-      done
+        gh api "repos/projectbluefin/$r/contents/$p?ref=testing" --jq .content | base64 -d \
+          | grep -oE '^[[:space:]]*-[[:space:]]+[A-Za-z0-9._/:+-]+\.bst$' \
+          | sed -E 's/^[[:space:]]*-[[:space:]]+//'
+      done \
+    | sort -u \
+    | grep -E 'cups|printing/base' \
+    | grep -vE "$accepted" \
+    | grep -v '^printer-app/'
 done
 ```
 
