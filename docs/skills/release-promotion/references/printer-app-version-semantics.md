@@ -80,8 +80,9 @@ validator's `examples` block. `R` = same upstream source, new build.
 | PostScript | `20240504-20` → `20240601-1` (new snapshot date) | `20240504-20` → `20240504-21` (same snapshot, bumped revision) — but indistinguishable from a packaging bump |
 
 ChairLift displays the same string: `internal/printerapp/printerapp.go` carries
-a `Version` field per family alongside a mandatory `Digest`, and `Image()`
-returns `repo@digest` whenever the digest is set. So a user-visible version
+a `Version` field per family alongside an optional `Digest`, and `Image()`
+returns `repo@digest` whenever the digest is set, falling back to
+`repo:version` when it is empty. So a user-visible version
 string and the immutable identity are already kept in the same struct, and a
 version bump is what a ChairLift pin update has to carry alongside the digest.
 
@@ -177,14 +178,17 @@ Gutenprint already implements and documents exactly that rule.
 - **No workflow in the four printer-app repos is changed from here.** Each
   enforces its own version form; this repo records the contract and the
   evidence. Changes belong in the owning repo, under its own review.
-- **CI wiring is only half done.** `just test` runs
+- **CI wiring is still a maintainer step.** `just test` runs
   `tests/test_check_printer_app_versions.py` (the suite-registration gate
-  requires it). Adding the same file to the validator pytest list in
-  `.github/workflows/unit-tests.yml` and running
-  `python3 scripts/check-printer-app-versions.py` from `validate.yml` is a
-  two-line follow-up that a maintainer can apply; it is not in the commit that
-  recorded the contract. Until then the validator is a local/`just test` gate
-  rather than a required check.
+  requires it), so the validator is a local/`just test` gate. Making it a
+  required check is two edits a maintainer can apply, but they touch
+  `.github/workflows/`, which the automation account may not write:
+  add `tests/test_check_printer_app_versions.py` to the validator pytest list
+  in `.github/workflows/unit-tests.yml`, and add a
+  `python scripts/check-printer-app-versions.py` step to
+  `.github/workflows/validate.yml` next to the `check-oci-refs.py` step. The
+  check is non-strict by default: recorded findings do not fail, only errors
+  do.
 - **No version transition is performed.** Verifying a representative transition
   per family (the third acceptance item) means publishing a real tag from a real
   `stable` promotion, which is operational work in those repos and a

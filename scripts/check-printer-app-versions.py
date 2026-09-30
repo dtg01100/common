@@ -199,7 +199,7 @@ def check_family(entry):
                     "examples.rebuild is recorded but rebuild_slot is 'none'",
                 )
             )
-    elif slot == "shared" and "rebuild" in examples:
+    elif slot == "shared":
         findings.append(
             finding(
                 "finding",
@@ -209,6 +209,14 @@ def check_family(entry):
                 "indistinguishable in the version string",
             )
         )
+        if "rebuild" not in examples:
+            findings.append(
+                finding(
+                    "error",
+                    family,
+                    "rebuild_slot is 'shared' but no examples.rebuild is recorded",
+                )
+            )
     elif slot == "suffix" and "rebuild" not in examples:
         findings.append(
             finding(

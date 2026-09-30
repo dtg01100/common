@@ -200,6 +200,18 @@ class TestCheckFamily:
         assert _severities(results, "error") == []
         assert any("shared with the packaging revision" in i["message"] for i in results)
 
+    def test_shared_slot_requires_a_rebuild_example(self):
+        entry = _entry(
+            grammar="^(?P<upstream>[0-9]+\\.[0-9]+\\.[0-9]+)-(?P<packaging>[0-9]+)$",
+            rebuild_slot="shared",
+            published_tags=["1.2.3-1"],
+            examples={"upstream_release": "1.2.4-1"},
+        )
+        results = check_family(entry)
+        assert any("shared with the packaging revision" in i["message"] for i in results)
+        errors = _severities(results, "error")
+        assert any("shared' but no examples.rebuild" in i["message"] for i in errors)
+
     def test_suffix_slot_requires_a_rebuild_example(self):
         entry = _entry(examples={"upstream_release": "1.2.4-1"})
         errors = _severities(check_family(entry), "error")
