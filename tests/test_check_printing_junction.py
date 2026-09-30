@@ -358,6 +358,13 @@ class TestRenovate:
         }
         assert renovate_manages_junction(config) is False
 
+    def test_an_unparseable_pattern_fails_closed(self):
+        # both fileMatch and managerFilePatterns fail closed on a malformed
+        # /regex/; the underlying re.error is wrapped in a Failure, not raised
+        config = {"customManagers": [{"customType": "regex", "fileMatch": ["[unclosed"]}]}
+        with pytest.raises(Failure, match="is not a regex"):
+            renovate_manages_junction(config)
+
         config = {"customManagers": [{"customType": "regex", "managerFilePatterns": ["/[unclosed/"]}]}
         with pytest.raises(Failure, match="is not a regex"):
             renovate_manages_junction(config)
@@ -378,6 +385,48 @@ class TestRenovate:
     def test_extends_of_the_wrong_type_is_no_preset(self):
         assert renovate_extends({"extends": "local>x"}) == []
         assert renovate_extends({}) == []
+
+    def test_regex_managers_is_recognised_as_a_junction_owner(self):
+        # Renovate's legacy regexManagers key (auto-migrated, still active)
+        # must count as a manager over the junction.
+        config = {"regexManagers": [{"fileMatch": ["^elements/fsdk-containers\\.bst$"]}]}
+        assert renovate_manages_junction(config) is True
+
+    def test_regex_managers_with_no_match_is_not_an_owner(self):
+        config = {"regexManagers": [{"fileMatch": ["^nothing/else\\.bst$"]}]}
+        assert renovate_manages_junction(config) is False
+
+    def test_a_slash_wrapped_regex_with_inline_flags_is_a_regex(self):
+        # /pattern/i  ->  regex (case-insensitive). The closing slash plus
+        # flag chars are stripped, the body is re.search'd.
+        config = {
+            "customManagers": [
+                {"customType": "regex", "managerFilePatterns": ["/^elements.FSDK-containers.bst$/i"]}
+            ]
+        }
+        assert renovate_manages_junction(config) is True
+
+    def test_a_slash_wrapped_path_with_a_trailing_colon_is_not_a_regex(self):
+        # /some/path/:foo — the colon is not an inline flag character, so the
+        # whole thing falls back to the glob path. The pattern does not match
+        # the junction, so the result is no owner.
+        config = {
+            "customManagers": [
+                {"customType": "regex", "managerFilePatterns": ["/some/path/:foo/"]}
+            ]
+        }
+        assert renovate_manages_junction(config) is False
+
+    def test_an_invalid_glob_character_class_fails_closed(self):
+        # [z-a] is a reversed range — Python's re rejects it; the regex
+        # path wraps re.error in Failure, and the glob path now does too.
+        config = {
+            "customManagers": [
+                {"customType": "regex", "managerFilePatterns": ["elements/[z-a]*"]}
+            ]
+        }
+        with pytest.raises(Failure, match="is not a regex"):
+            renovate_manages_junction(config)
 
 
 # ---------------------------------------------------------------------------

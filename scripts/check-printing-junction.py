@@ -245,8 +245,10 @@ def renovate_file_patterns(config: dict) -> list[tuple[str, str]]:
 
     The key matters, because the two keys do not share a syntax: ``fileMatch``
     entries are always regexes, while ``managerFilePatterns`` (which replaced
-    it) is a glob unless the entry is wrapped in slashes. ``enabledManagers``
-    names no file pattern at all and is returned only for the record.
+    it) is a glob unless the entry is wrapped in slashes. ``regexManagers`` is
+    Renovate's legacy spelling (still auto-migrated, still active) and its
+    ``fileMatch`` is also a regex. ``enabledManagers`` names no file pattern
+    at all and is returned only for the record.
     """
     patterns: list[tuple[str, str]] = []
     managers = config.get("customManagers")
@@ -257,6 +259,15 @@ def renovate_file_patterns(config: dict) -> list[tuple[str, str]]:
                     value = manager.get(key)
                     if isinstance(value, list):
                         patterns.extend((key, v) for v in value if isinstance(v, str))
+    regex_managers = config.get("regexManagers")
+    if isinstance(regex_managers, list):
+        for manager in regex_managers:
+            if isinstance(manager, dict):
+                value = manager.get("fileMatch")
+                if isinstance(value, list):
+                    patterns.extend(
+                        ("fileMatch", v) for v in value if isinstance(v, str)
+                    )
     if isinstance(config.get("enabledManagers"), list):
         patterns.extend(
             ("enabledManagers", manager)
@@ -312,7 +323,43 @@ def glob_matches_junction(pattern: str) -> bool:
         else:
             regex += re.escape(char)
         index += 1
-    return re.fullmatch(regex, JUNCTION) is not None
+    try:
+        return re.fullmatch(regex, JUNCTION) is not None
+    except re.error as error:
+        # A malformed glob class (e.g. `[z-a]`, which Python rejects as a
+        # reversed range) would otherwise escape as an uncaught traceback;
+        # surface it as the same Failure the regex path uses.
+        raise Failure(f"renovate.json glob {pattern!r} is not a regex: {error}") from None
+
+
+_RENOVATE_REGEX_FLAGS = {
+    "i": re.IGNORECASE,
+    "m": re.MULTILINE,
+    "s": re.DOTALL,
+    "x": re.VERBOSE,
+}
+
+
+def _split_renovate_slash_regex(pattern: str) -> tuple[str, int] | None:
+    """Split ``/regex/flags/`` into ``(expression, flags)``.
+
+    Returns ``None`` when the pattern is not slash-wrapped. Inline flag chars
+    must all be in ``[imxs]``; anything else is treated as no-flags to avoid
+    misclassifying a path that contains a colon as a regex.
+    """
+    if not pattern.startswith("/") or len(pattern) < 3:
+        return None
+    closing = pattern.rfind("/")
+    if closing <= 0:
+        return None
+    tail = pattern[closing + 1:]
+    flags = 0
+    if tail:
+        if not all(c in _RENOVATE_REGEX_FLAGS for c in tail):
+            return None
+        for char in tail:
+            flags |= _RENOVATE_REGEX_FLAGS[char]
+    return pattern[1:closing], flags
 
 
 def pattern_matches_junction(pattern: str, regex: bool = False) -> bool:
@@ -323,18 +370,18 @@ def pattern_matches_junction(pattern: str, regex: bool = False) -> bool:
     entry is a ``managerFilePatterns`` one, which is a glob
     (``include/source-pins.yml``) unless it is wrapped in slashes
     (``/^elements\\/fsdk-containers\\.bst$/``), which is how the printer forks
-    write theirs.
+    write theirs. Inline flags (``/.../i``) are honored so the pattern still
+    reads as a regex.
     """
     if regex:
-        expression: str | None = pattern
-    elif pattern.startswith("/") and pattern.endswith("/") and len(pattern) > 1:
-        expression = pattern[1:-1]
+        expression, flags = pattern, 0
     else:
-        expression = None
-    if expression is None:
-        return glob_matches_junction(pattern.lstrip("/"))
+        split = _split_renovate_slash_regex(pattern)
+        if split is None:
+            return glob_matches_junction(pattern.lstrip("/"))
+        expression, flags = split
     try:
-        return re.search(expression, JUNCTION) is not None
+        return re.search(expression, JUNCTION, flags) is not None
     except re.error:
         raise Failure(f"renovate.json file pattern {pattern!r} is not a regex") from None
 
