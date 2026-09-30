@@ -275,6 +275,12 @@ def glob_matches_junction(pattern: str) -> bool:
     ``*.bst`` — which minimatch reads as "a ``.bst`` file at the repository
     root" — would otherwise be read as a manager of the junction and reported
     as a second writer that is not there.
+
+    Known limitation: minimatch's brace expansion (``{a,b}``) is not handled
+    here, so ``elements/{fsdk-containers,other}.bst`` returns False even
+    though minimatch would match the junction. None of the printer forks'
+    current ``renovate.json`` files use brace expansion over the junction, so
+    the check stays sound; add the expansion if that ever changes.
     """
     regex = ""
     index = 0
