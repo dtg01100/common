@@ -18,6 +18,17 @@ that contract is consumed by `bluefin`, `bluefin-lts`, `dakota`,
 `aurora`-adjacent variants, and downstream derivatives such as
 `projectbluefin/utah`.**
 
+The issue lists four open questions this decision must answer:
+
+1. **Granularity** (§4): one contract file or a split?
+2. **Versioning** (§5): Renovate-style bump PRs or floating tags per
+   stream?
+3. **Enforcement** (§6): in-build only, or also a scheduled cross-repo
+   report?
+4. **Test relationship** (§6a): the contract lives as data + a new
+   verifier in `common` `tests/`, or the existing per-repo `tests/`
+   suites grow contract assertions?
+
 Until §8 is filled in, the standing position is **no change**: each
 consumer repo keeps its own copy of the contract and runs its own
 verifiers, with drift detected only by hand. This record exists so the
@@ -175,6 +186,63 @@ A defensible default is **all three**, in order of priority:
 report is owned elsewhere because it crosses repo boundaries that
 `common` cannot enforce on its own.
 
+## 6a. Relationship to existing tests (issue open question 4)
+
+The issue asks: does the contract live as data + a new verifier in
+`common` `tests/`, or do existing tests grow contract assertions?
+
+Both patterns already exist:
+
+- `tests/test_check_oci_refs.py`, `tests/test_curated_config.py`,
+  `tests/test_skill_docs.py`, and the BATS suites under `tests/`
+  exercise the **data the contract will read**: OCI labels, curated
+  config JSON, skill docs cross-references, and bash gating. These
+  are the right home for assertions about *the contract's existing
+  consumers* (e.g. "Utah's desktop TOML still passes after the
+  contract moves").
+- No suite today exercises the **shape of the Bluefin promise
+  itself** — package-set identity, desktop branding identity, image
+  identity vocabulary. Each consumer repo re-derives these locally
+  with its own verifier (Utah's `utah-verify-desktop-contract`,
+  `utah-verify-rpm-contract`; the per-distro installer recipes).
+  The verifiers duplicate logic that, under any of Options A–C, would
+  become shared.
+
+Two viable shapes:
+
+1. **Centralize: data + new verifier in `common` `tests/`.** A
+   `tests/test_bluefin_contract.py` reads the three contract files
+   (§4) and asserts the same properties the per-distro verifiers
+   do today, plus the cross-section invariants only `common` can
+   see (e.g. "the identity vocabulary in `docs/skills/image-identity.md`
+   is the same set the desktop TOML keys reference"). Per-distro
+   verifiers shrink to consumers of `common`'s data.
+
+2. **Grow assertions into the existing suites.** Each existing
+   test file gets a new contract-assertion block, and the
+   contract data lives as fixture inputs the suite reads. No new
+   file under `tests/`; the per-distro verifiers stay as-is.
+
+Shape 1 wins on two axes:
+
+- The new file is the **single place** where a Bluefin-contract
+  regression surfaces, matching the RFC's "centralized contract"
+  premise. Shape 2 spreads the regression surface across N existing
+  files in N repos.
+- Shape 1 keeps the per-distro verifier logic in one repo (`common`),
+  so a fix lands once. Shape 2 means every consumer repo's verifier
+  still needs the same fix.
+
+Shape 2 wins on one axis:
+
+- Lower initial diff. No new test file, no fixture restructure, no
+  deletion of per-distro verifier logic. Shape 2 is a *documentation*
+  change for each existing suite.
+
+The recommended default is Shape 1, with Shape 2 as a deferred
+follow-up if Shape 1 turns out to require a deletion the maintainer
+is unwilling to make. The decision lands in §8 alongside the others.
+
 ## 7. Gate checklist
 
 The record may move from `OPEN` to a shipped state only when **all** of
@@ -212,6 +280,7 @@ the following are addressed:
 | **Granularity** | _pending_ (three top-level files in `common`, or single mega-file, or other) |
 | **Versioning** | _pending_ (SHA-pin + Renovate, floating tag per stream, or other) |
 | **Enforcement** | _pending_ (in-build + in-CI + cross-repo report, or subset) |
+| **Relationship to existing tests** | _pending_ (centralized contract + new verifier in `common` `tests/`, or grow assertions into the existing Utah `tests/` suites — see §6a) |
 | **Decider** | _pending_ |
 | **Date** | _pending_ |
 | **Repos affected** | _pending_ (common, bluefin, bluefin-lts, dakota, utah, others) |
