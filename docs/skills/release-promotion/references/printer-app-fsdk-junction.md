@@ -79,12 +79,24 @@ must not be promoted. That is no longer the state of the tree:
   them, and `fsdk-containers` owns the equivalent
   `patches/printing/cups/*.patch` for the built path.
 
-## What remains (not `common` code)
+common#1239 has **four** acceptance criteria; this document addresses criteria
+1 (pin/labels agreement, no floating branch, no duplicate CUPS owner) and 3
+(resolved USB overlap; OCI cutover #40 merged). The remaining criteria stay
+open and live in the appliance repos:
 
-- **PostScript public promotion stays blocked** on
+- **Criterion 2** — *real image-backed native amd64/arm64 socket-print,
+  state-restart and runtime-closure CI for PS, HPLIP, Gutenprint against the
+  new pin, with check URLs recorded.* That evidence lives in each appliance
+  repo's image epic and PR, not in `common`; this PR does not collect it. If
+  criterion 2 is needed before the issue can close, the owner is whichever
+  appliance epic the recorded check URLs land in.
+- **Criterion 4** — PS public promotion stays blocked on
   [ps-printer-app#27](https://github.com/projectbluefin/ps-printer-app/issues/27)
   (security sign-off). Source and CI verification of the pin do not authorize
   a release; see [printer-app-promotion.md](./printer-app-promotion.md).
+
+## What remains (not `common` code)
+
 - **The daily junction bump is failing in the appliance repos.** The
   `Update fsdk-containers base` workflow fails in all of them (for example
   [ps #36545192555](https://github.com/projectbluefin/ps-printer-app/actions/runs/36545192555),
