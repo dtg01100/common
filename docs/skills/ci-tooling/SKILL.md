@@ -89,6 +89,8 @@ uses: actions/checkout@v4
 uses: actions/checkout@main
 ```
 
+### Internal refs
+
 **Internal `projectbluefin/` refs use managed floating tags (`@main` or `@v1`), not SHA pins.** The `no-floating-action-tags` hook exempts all `projectbluefin/` refs. See [sha-pinning.md](references/sha-pinning.md) for the full policy and Floating-tag guard details.
 
 ---
