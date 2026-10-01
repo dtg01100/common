@@ -226,6 +226,317 @@ EOF
     [ "$status" -eq 0 ]
 }
 
+@test "baseline bug-report draft includes hardware summary and load average" {
+    mkdir -p "$WORKDIR/sys/class/dmi/id" "$WORKDIR/sys/class/net" "$WORKDIR/draft"
+    printf 'TestVendor\n' > "$WORKDIR/sys/class/dmi/id/sys_vendor"
+    printf 'TestModel\n' > "$WORKDIR/sys/class/dmi/id/product_name"
+    printf 'eth0\n' > "$WORKDIR/sys/class/net/eth0"
+
+    cat << 'EOF' > "$WORKDIR/bin/systemctl"
+#!/usr/bin/bash
+printf 'failed-example.service loaded failed failed\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/journalctl"
+#!/usr/bin/bash
+printf 'kernel: mock error\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lscpu"
+#!/usr/bin/bash
+printf 'Model name: TestCorp CPU\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lspci"
+#!/usr/bin/bash
+printf '00:02.0 VGA compatible controller: TestCorp GPU\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/free"
+#!/usr/bin/bash
+printf 'Mem:           16Gi       2.0Gi        11Gi\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lsblk"
+#!/usr/bin/bash
+printf 'nvme0 1.8T\n'
+EOF
+    chmod +x "$WORKDIR/bin/"*
+
+    run env PATH="$WORKDIR/bin:$PATH" \
+        DMI_ID_PATH="$WORKDIR/sys/class/dmi/id" \
+        SYS_CLASS_NET_PATH="$WORKDIR/sys/class/net" \
+        bash -c '
+            source "$1"
+            DRAFT_DIR="$2"
+            IMAGE_REF="ghcr.io/projectbluefin/dakota-nvidia-gaming"
+            IMAGE_TAG="testing"
+            IMAGE_VERSION="20260929"
+            IMAGE_FLAVOR="gaming"
+            BOOTED_DIGEST="sha256:abc"
+            collect_baseline "Test title" "Test desc" "Test repro" < /dev/null
+        ' _ "$BONEDIGGER_SCRIPT" "$WORKDIR/draft"
+
+    [ "$status" -eq 0 ]
+    [ -f "$WORKDIR/draft/issue.md" ]
+    grep -Fq 'TestVendor' "$WORKDIR/draft/issue.md"
+    grep -Fq 'TestModel' "$WORKDIR/draft/issue.md"
+    grep -Fq 'Hardware summary' "$WORKDIR/draft/issue.md"
+    grep -Fq 'TestCorp CPU' "$WORKDIR/draft/issue.md"
+    grep -Fq 'TestCorp GPU' "$WORKDIR/draft/issue.md"
+}
+
+@test "hardware smart log captures DMI, CPU, GPU, disk, and PCI inventory" {
+    mkdir -p "$WORKDIR/sys/class/dmi/id" "$WORKDIR/sys/class/net"
+    printf 'TestVendor\n' > "$WORKDIR/sys/class/dmi/id/sys_vendor"
+    printf 'TestModel 9000\n' > "$WORKDIR/sys/class/dmi/id/product_name"
+    printf 'TestFamily\n' > "$WORKDIR/sys/class/dmi/id/product_family"
+    printf '1.0\n' > "$WORKDIR/sys/class/dmi/id/product_version"
+    printf 'TestBIOS\n' > "$WORKDIR/sys/class/dmi/id/bios_vendor"
+    printf '1.00\n' > "$WORKDIR/sys/class/dmi/id/bios_version"
+    printf '3\n' > "$WORKDIR/sys/class/dmi/id/chassis_type"
+    for iface in eth0 wlan0 lo; do
+        printf 'state\n' > "$WORKDIR/sys/class/net/$iface"
+    done
+
+    cat << 'EOF' > "$WORKDIR/bin/lspci"
+#!/usr/bin/bash
+printf '00:02.0 VGA compatible controller: TestCorp UHD Graphics [1234:5678]\n'
+printf '01:00.0 Network controller: TestCorp Wireless [DEAD:BEEF]\n'
+EOF
+
+    cat << 'EOF' > "$WORKDIR/bin/lsusb"
+#!/usr/bin/bash
+printf 'Bus 001 Device 001: ID 1d6b:0002 TestCorp Hub\n'
+printf 'Bus 001 Device 002: ID CAFE:1234 TestCorp Keyboard\n'
+EOF
+
+    cat << 'EOF' > "$WORKDIR/bin/lscpu"
+#!/usr/bin/bash
+cat << 'CPU'
+Architecture:        x86_64
+Vendor ID:           GenuineIntel
+Model name:          TestCorp i9-9900K
+CPU(s):              8
+Thread(s) per core:  2
+Core(s) per socket:  4
+Socket(s):           1
+CPU max MHz:         3600.0000
+CPU min MHz:         800.0000
+L1d cache:           32K
+L1i cache:           32K
+L2 cache:            256K
+L3 cache:            16384K
+CPU
+EOF
+
+    cat << 'EOF' > "$WORKDIR/bin/lsblk"
+#!/usr/bin/bash
+cat << 'LSBLK'
+NAME  SIZE ROTA TRAN MODEL
+nvme0 1.8T    0  nvme TestCorp SSD
+sda   1.8T    1  sata TestCorp HDD
+LSBLK
+EOF
+
+    cat << 'EOF' > "$WORKDIR/bin/free"
+#!/usr/bin/bash
+cat << 'FREE'
+              total        used        free      shared  buff/cache   available
+Mem:           16Gi       2.0Gi        11Gi       100Mi       3.0Gi        14Gi
+Swap:         4.0Gi          0B       4.0Gi
+FREE
+EOF
+
+    cat << 'EOF' > "$WORKDIR/bin/gnome-shell"
+#!/usr/bin/bash
+printf 'GNOME Shell 99.0\n'
+EOF
+
+    chmod +x \
+        "$WORKDIR/bin/lspci" \
+        "$WORKDIR/bin/lsusb" \
+        "$WORKDIR/bin/lscpu" \
+        "$WORKDIR/bin/lsblk" \
+        "$WORKDIR/bin/free" \
+        "$WORKDIR/bin/gnome-shell"
+
+    run env PATH="$WORKDIR/bin:$PATH" \
+        DMI_ID_PATH="$WORKDIR/sys/class/dmi/id" \
+        SYS_CLASS_NET_PATH="$WORKDIR/sys/class/net" \
+        bash -c '
+            source "$1"
+            collect_profile Hardware "$2/hardware.md" 16384
+        ' _ "$BONEDIGGER_SCRIPT" "$WORKDIR"
+
+    [ "$status" -eq 0 ]
+    grep -Fq 'TestVendor' "$WORKDIR/hardware.md"
+    grep -Fq 'TestModel 9000' "$WORKDIR/hardware.md"
+    grep -Fq 'TestCorp i9-9900K' "$WORKDIR/hardware.md"
+    grep -Fq 'Graphics devices' "$WORKDIR/hardware.md"
+    grep -Fq 'PCI devices:    2' "$WORKDIR/hardware.md"
+    grep -Fq 'USB devices:    2' "$WORKDIR/hardware.md"
+    grep -Fq 'wlan0' "$WORKDIR/hardware.md"
+    ! grep -Fq 'wlan0.*lo' "$WORKDIR/hardware.md"
+    grep -Fq 'TestCorp SSD' "$WORKDIR/hardware.md"
+}
+
+@test "hardware smart log redacts home paths and identifiers" {
+    mkdir -p "$WORKDIR/sys/class/dmi/id" "$WORKDIR/sys/class/net"
+    printf 'TestVendor\n' > "$WORKDIR/sys/class/dmi/id/sys_vendor"
+    printf 'TestModel\n' > "$WORKDIR/sys/class/dmi/id/product_name"
+    printf 'eth0\n' > "$WORKDIR/sys/class/net/eth0"
+
+    cat << 'EOF' > "$WORKDIR/bin/lspci"
+#!/usr/bin/bash
+printf '00:02.0 VGA compatible controller: TestCorp GPU from /home/alice/secret\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lscpu"
+#!/usr/bin/bash
+printf 'Model name:          TestCorp from /home/bob/private\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lsblk"
+#!/usr/bin/bash
+printf 'nvme0 1.8T 0 nvme TestCorp /home/alice/private\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lsusb"
+#!/usr/bin/bash
+printf 'Bus 001 Device 002: ID CAFE:1234 from /home/alice/path\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/free"
+#!/usr/bin/bash
+printf 'Mem:           16Gi       2.0Gi        11Gi\n'
+EOF
+
+    chmod +x \
+        "$WORKDIR/bin/lspci" \
+        "$WORKDIR/bin/lsusb" \
+        "$WORKDIR/bin/lscpu" \
+        "$WORKDIR/bin/lsblk" \
+        "$WORKDIR/bin/free"
+
+    run env PATH="$WORKDIR/bin:$PATH" \
+        DMI_ID_PATH="$WORKDIR/sys/class/dmi/id" \
+        SYS_CLASS_NET_PATH="$WORKDIR/sys/class/net" \
+        bash -c '
+            source "$1"
+            collect_profile Hardware "$2/hardware.md" 16384
+        ' _ "$BONEDIGGER_SCRIPT" "$WORKDIR"
+
+    [ "$status" -eq 0 ]
+    grep -Fq '/home/[REDACTED]/' "$WORKDIR/hardware.md"
+    ! grep -Fq '/home/alice/' "$WORKDIR/hardware.md"
+    ! grep -Fq '/home/bob/' "$WORKDIR/hardware.md"
+}
+
+@test "collect_hardware_summary renders CPU, GPU, memory, disks, and network" {
+    mkdir -p "$WORKDIR/sys/class/net"
+    for iface in eth0 wlan0 lo; do
+        printf 'state\n' > "$WORKDIR/sys/class/net/$iface"
+    done
+
+    cat << 'EOF' > "$WORKDIR/bin/lscpu"
+#!/usr/bin/bash
+printf 'Model name:          TestCorp i7-13700K\n'
+EOF
+
+    cat << 'EOF' > "$WORKDIR/bin/lspci"
+#!/usr/bin/bash
+printf '00:02.0 VGA compatible controller: TestCorp UHD 770\n'
+EOF
+
+    cat << 'EOF' > "$WORKDIR/bin/free"
+#!/usr/bin/bash
+printf '              total        used        free      shared  buff/cache   available\nMem:           32Gi       4.0Gi        25Gi       100Mi       3.0Gi        28Gi\n'
+EOF
+
+    cat << 'EOF' > "$WORKDIR/bin/lsblk"
+#!/usr/bin/bash
+cat << 'LSBLK'
+nvme0n1 1.8T TestCorp SSD
+sda 1.8T TestCorp HDD
+LSBLK
+EOF
+
+    chmod +x \
+        "$WORKDIR/bin/lscpu" \
+        "$WORKDIR/bin/lspci" \
+        "$WORKDIR/bin/free" \
+        "$WORKDIR/bin/lsblk"
+
+    run env PATH="$WORKDIR/bin:$PATH" \
+        SYS_CLASS_NET_PATH="$WORKDIR/sys/class/net" \
+        bash -c '
+            source "$1"
+            collect_hardware_summary > "$2/hw.txt"
+        ' _ "$BONEDIGGER_SCRIPT" "$WORKDIR"
+
+    [ "$status" -eq 0 ]
+    grep -Fq 'TestCorp i7-13700K' "$WORKDIR/hw.txt"
+    grep -Fq 'TestCorp UHD 770' "$WORKDIR/hw.txt"
+    grep -Fq '32Gi total / 28Gi available' "$WORKDIR/hw.txt"
+    grep -Fq 'nvme0n1 1.8T TestCorp' "$WORKDIR/hw.txt"
+    grep -Fq 'eth0,wlan0' "$WORKDIR/hw.txt"
+}
+
+@test "collect_hardware_summary tolerates missing probes by reporting _unavailable_" {
+    cat << 'EOF' > "$WORKDIR/bin/lscpu"
+#!/usr/bin/bash
+printf 'Model name: TestCorp\n'
+EOF
+    chmod +x "$WORKDIR/bin/lscpu"
+
+    run env PATH="$WORKDIR/bin:$PATH" \
+        SYS_CLASS_NET_PATH="$WORKDIR/missing-net-path" \
+        bash -c '
+            source "$1"
+            collect_hardware_summary > "$2/hw.txt"
+        ' _ "$BONEDIGGER_SCRIPT" "$WORKDIR"
+
+    [ "$status" -eq 0 ]
+    grep -Fq 'TestCorp' "$WORKDIR/hw.txt"
+    grep -Fq '_unavailable_' "$WORKDIR/hw.txt"
+}
+
+@test "hardware smart log is bounded by the per-profile byte cap" {
+    mkdir -p "$WORKDIR/sys/class/dmi/id" "$WORKDIR/sys/class/net"
+    printf 'TestVendor\n' > "$WORKDIR/sys/class/dmi/id/sys_vendor"
+    printf 'eth0\n' > "$WORKDIR/sys/class/net/eth0"
+
+    cat << 'EOF' > "$WORKDIR/bin/lspci"
+#!/usr/bin/bash
+printf '00:02.0 VGA compatible controller: GPU line one\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lscpu"
+#!/usr/bin/bash
+printf 'Model name: tiny\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lsblk"
+#!/usr/bin/bash
+printf 'nvme0 1.8T\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lsusb"
+#!/usr/bin/bash
+printf 'Bus 001\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/free"
+#!/usr/bin/bash
+printf 'Mem: 16Gi\n'
+EOF
+    chmod +x \
+        "$WORKDIR/bin/lspci" \
+        "$WORKDIR/bin/lsusb" \
+        "$WORKDIR/bin/lscpu" \
+        "$WORKDIR/bin/lsblk" \
+        "$WORKDIR/bin/free"
+
+    run env PATH="$WORKDIR/bin:$PATH" \
+        DMI_ID_PATH="$WORKDIR/sys/class/dmi/id" \
+        SYS_CLASS_NET_PATH="$WORKDIR/sys/class/net" \
+        bash -c '
+            source "$1"
+            collect_profile Hardware "$2/hardware.md" 256
+            test "$(wc -c < "$2/hardware.md")" -le 256
+        ' _ "$BONEDIGGER_SCRIPT" "$WORKDIR"
+
+    [ "$status" -eq 0 ]
+}
+
 @test "selected profile bundle is capped at two MiB" {
     cat << 'EOF' > "$WORKDIR/bin/journalctl"
 #!/usr/bin/bash

@@ -45,11 +45,16 @@ before collecting data.
 
 Bug reports collect a short title, description, and reproduction steps, then
 offer zero or more bounded smart-log profiles: desktop/graphics, sleep/crash,
-update/boot, networking, and Flatpak/application. The baseline report is at
-most 64 KiB; each profile is at most 500 KiB and all selected profiles total
-at most 2 MiB. Collection is an allowlist of targeted commands, and journal
-output uses the on-device redaction functions. OTel capture is not part of this
-flow.
+update/boot, networking, Flatpak/application, and Hardware. The baseline
+report is at most 64 KiB; each profile is at most 500 KiB and all selected
+profiles total at most 2 MiB. Collection is an allowlist of targeted commands,
+and journal output uses the on-device redaction functions. OTel capture is
+not part of this flow.
+
+Every bug-report baseline also includes a compact hardware overview (CPU
+model, GPU identity, memory, disk model and size, and network interface
+list) so a maintainer can see the machine the bug came from without the user
+having to opt in to a profile (`common#1338`).
 
 Every payload is previewed locally. Submission requires explicit consent,
 uses `gh issue create` rather than a browser form, and offers final-submission

@@ -231,6 +231,176 @@ profile_flatpak_application() {
     printf '```\n'
 }
 
+# Hardware inventory profile. Captures a bounded view of CPU/memory/GPU/disk/
+# DMI/PCI/USB devices, including the original GIST_PCI-style GPU detection
+# (lspci + nvidia-smi + AMD DRM sysfs), so reporters and maintainers can see
+# the machine a bug was filed from without uploading a full dmidecode dump.
+# projectbluefin/common#1338.
+profile_hardware() {
+    printf '## Hardware smart log\n\n'
+
+    local dmi_id_path="${DMI_ID_PATH:-/sys/class/dmi/id}"
+
+    printf '### DMI / system identity\n\n```\n'
+    if [[ -r "$dmi_id_path/sys_vendor" ]]; then
+        printf 'Vendor:   %s\n' "$(< "$dmi_id_path/sys_vendor")"
+    fi
+    if [[ -r "$dmi_id_path/product_name" ]]; then
+        printf 'Product:  %s\n' "$(< "$dmi_id_path/product_name")"
+    fi
+    if [[ -r "$dmi_id_path/product_family" ]]; then
+        printf 'Family:   %s\n' "$(< "$dmi_id_path/product_family")"
+    fi
+    if [[ -r "$dmi_id_path/product_version" ]]; then
+        printf 'Version:  %s\n' "$(< "$dmi_id_path/product_version")"
+    fi
+    if [[ -r "$dmi_id_path/bios_vendor" ]]; then
+        local bios_vendor
+        bios_vendor="$(< "$dmi_id_path/bios_vendor")"
+        local bios_version="unknown"
+        if [[ -r "$dmi_id_path/bios_version" ]]; then
+            bios_version="$(< "$dmi_id_path/bios_version")"
+        fi
+        printf 'BIOS:     %s %s\n' "$bios_vendor" "$bios_version"
+    fi
+    if [[ -r "$dmi_id_path/chassis_type" ]]; then
+        printf 'Chassis:  type=%s\n' "$(< "$dmi_id_path/chassis_type")"
+    fi
+    printf '```\n\n'
+
+    printf '### CPU\n\n```\n'
+    if command -v lscpu &>/dev/null; then
+        lscpu 2>/dev/null | grep -iE \
+            '^(Architecture|Model name|Vendor ID|CPU\(s\)|Thread\(s\) per core|Core\(s\) per socket|Socket\(s\)|CPU max MHz|CPU min MHz|Virtualization|L1d|L1i|L2|L3):' | \
+            scrub_kernel_log || true
+    elif [[ -r /proc/cpuinfo ]]; then
+        awk -F: '/^model name|^vendor_id|^cpu family|^cpu MHz|^cache size/ {print $1": "$2}' \
+            /proc/cpuinfo | sort -u | scrub_kernel_log || true
+    else
+        printf '_CPU info unavailable_\n'
+    fi
+    printf '```\n\n'
+
+    printf '### Memory\n\n```\n'
+    if command -v free &>/dev/null; then
+        free -h --si 2>/dev/null | head -3 | scrub_kernel_log || printf '_unavailable_\n'
+    else
+        printf '_free unavailable_\n'
+    fi
+    printf '```\n\n'
+
+    printf '### Graphics devices\n\n'
+    local gpu_pci
+    if command -v lspci &>/dev/null; then
+        gpu_pci="$(lspci 2>/dev/null | grep -iE 'VGA|Display|3D controller|2D controller' || true)"
+    else
+        gpu_pci=""
+    fi
+    if [[ -n "$gpu_pci" ]]; then
+        printf '```\n%s\n```\n' "$(printf '%s' "$gpu_pci" | scrub_kernel_log)"
+    else
+        printf '_No PCI GPU detected_\n'
+    fi
+    if command -v nvidia-smi &>/dev/null; then
+        printf '\n#### NVIDIA (`nvidia-smi -q`)\n\n```\n'
+        nvidia-smi -q 2>/dev/null | sed -E \
+            -e 's/GPU UUID[[:space:]]*:[[:space:]]*[A-Za-z0-9_-]*/GPU UUID                          : [REDACTED]/g' \
+            -e 's/Serial Number[[:space:]]*:[[:space:]]*[A-Za-z0-9_-]*/Serial Number                     : [REDACTED]/g' \
+            -e 's/Bus Id[[:space:]]*:[[:space:]]*[A-Za-z0-9:.]*[0-9][A-Za-z0-9:.]*/Bus Id                            : [REDACTED]/g' \
+            -e 's/Minor Number[[:space:]]*:[[:space:]]*[0-9]*/Minor Number                      : [REDACTED]/g' \
+            -e 's|/(var/)?home/[^/[:space:]]+/|/\1home/[REDACTED]/|g' \
+            | head -80 | scrub_journal_log || true
+        printf '```\n'
+    fi
+    if compgen -G '/sys/class/drm/card[0-9]*/device/gpu_busy_percent' &>/dev/null; then
+        printf '\n#### AMD / DRM sysfs\n\n'
+        printf '| Card | GPU %% | VRAM Used / Total | GTT Used / Total | Temp | Power |\n'
+        printf '|------|-------|-------------------|------------------|------|--------|\n'
+        local card card_id busy vram_used vram_total gtt_used gtt_total
+        local vram_used_h vram_total_h gtt_used_h gtt_total_h gpu_temp gpu_power hwmon raw
+        for card in /sys/class/drm/card[0-9]*/; do
+            [[ -f "${card}device/gpu_busy_percent" ]] || continue
+            card_id="${card%/}"; card_id="${card_id##*/}"
+            busy="$(cat "${card}device/gpu_busy_percent" 2>/dev/null || true)"
+            vram_used="$(cat "${card}device/mem_info_vram_used" 2>/dev/null || true)"
+            vram_total="$(cat "${card}device/mem_info_vram_total" 2>/dev/null || true)"
+            gtt_used="$(cat "${card}device/mem_info_gtt_used" 2>/dev/null || true)"
+            gtt_total="$(cat "${card}device/mem_info_gtt_total" 2>/dev/null || true)"
+            vram_used_h="$(numfmt --to=iec-i -- "$vram_used" 2>/dev/null || echo "N/A")"
+            vram_total_h="$(numfmt --to=iec-i -- "$vram_total" 2>/dev/null || echo "N/A")"
+            gtt_used_h="$(numfmt --to=iec-i -- "$gtt_used" 2>/dev/null || echo "N/A")"
+            gtt_total_h="$(numfmt --to=iec-i -- "$gtt_total" 2>/dev/null || echo "N/A")"
+            gpu_temp="N/A"; gpu_power="N/A"
+            for hwmon in "${card}device/hwmon/hwmon"[0-9]*/; do
+                [[ -d "$hwmon" ]] || continue
+                if [[ -f "${hwmon}temp1_input" ]]; then
+                    raw="$(cat "${hwmon}temp1_input" 2>/dev/null || true)"
+                    [[ -n "$raw" ]] && gpu_temp="$(( raw / 1000 ))°C"
+                fi
+                if [[ -f "${hwmon}power1_average" ]]; then
+                    raw="$(cat "${hwmon}power1_average" 2>/dev/null || true)"
+                    [[ -n "$raw" ]] && gpu_power="$(( raw / 1000000 ))W"
+                fi
+                break
+            done
+            printf '| %s | %s%% | %s / %s | %s / %s | %s | %s |\n' \
+                "$card_id" "${busy:-N/A}" "$vram_used_h" "$vram_total_h" \
+                "$gtt_used_h" "$gtt_total_h" "$gpu_temp" "$gpu_power"
+        done
+        printf '\n'
+    fi
+
+    printf '### Disks and storage controllers\n\n```\n'
+    if command -v lsblk &>/dev/null; then
+        lsblk -d -o NAME,SIZE,ROTA,TRAN,MODEL 2>/dev/null | head -40 | \
+            scrub_kernel_log || printf '_unavailable_\n'
+    else
+        printf '_lsblk unavailable_\n'
+    fi
+    printf '```\n\n'
+
+    printf '### PCI / USB inventory\n\n```\n'
+    if command -v lspci &>/dev/null; then
+        printf 'PCI devices:    %s\n' \
+            "$(lspci 2>/dev/null | wc -l | tr -d ' ')"
+    else
+        printf 'PCI devices:    _lspci unavailable_\n'
+    fi
+    if command -v lsusb &>/dev/null; then
+        printf 'USB devices:    %s\n' \
+            "$(lsusb 2>/dev/null | wc -l | tr -d ' ')"
+    else
+        printf 'USB devices:    _lsusb unavailable_\n'
+    fi
+    local sys_class_net="${SYS_CLASS_NET_PATH:-/sys/class/net}"
+    local -a net_ifaces=()
+    local iface
+    for iface in "$sys_class_net"/*; do
+        [[ -e "$iface" ]] || continue
+        net_ifaces+=("$(basename "$iface")")
+    done
+    printf 'Network ifaces: %s\n' "${#net_ifaces[@]}"
+    printf '\nNetwork interfaces (name only): %s\n' \
+        "$(printf '%s\n' "${net_ifaces[@]}" | grep -v '^lo$' | sort -u | paste -sd, -)"
+    printf '```\n\n'
+
+    printf '### Session software versions\n\n```\n'
+    if command -v gnome-shell &>/dev/null; then
+        printf 'GNOME:     %s\n' "$(gnome-shell --version 2>/dev/null || echo unknown)"
+    fi
+    printf 'Kernel:    %s\n' "$(uname -r)"
+    printf 'Arch:      %s\n' "$(uname -m)"
+    if command -v flatpak &>/dev/null; then
+        printf 'Flatpaks:  %s installed\n' \
+            "$(flatpak list --columns=application 2>/dev/null | wc -l | tr -d ' ')"
+    fi
+    if [[ -f /etc/os-release ]]; then
+        printf 'OS:        %s\n' \
+            "$(grep -E '^(NAME|VERSION)=' /etc/os-release | tr '\n' ' ')"
+    fi
+    printf '```\n'
+}
+
 profile_filename() {
     case "$1" in
         "Desktop / graphics") printf 'desktop-graphics.md\n' ;;
@@ -238,6 +408,7 @@ profile_filename() {
         "Update / boot") printf 'update-boot.md\n' ;;
         Networking) printf 'networking.md\n' ;;
         "Flatpak / application") printf 'flatpak-application.md\n' ;;
+        Hardware) printf 'hardware.md\n' ;;
         *) return 1 ;;
     esac
 }
@@ -253,6 +424,7 @@ collect_profile() {
         "Update / boot") profile_update_boot > "$output" ;;
         Networking) profile_networking > "$output" ;;
         "Flatpak / application") profile_flatpak_application > "$output" ;;
+        Hardware) profile_hardware > "$output" ;;
         *) return 1 ;;
     esac
     limit_file "$output" "$limit"
@@ -265,7 +437,7 @@ choose_profiles() {
     SELECTED_PROFILES=()
     while IFS= read -r selected; do
         case "$selected" in
-            "Desktop / graphics"|"Sleep / crash"|"Update / boot"|Networking|"Flatpak / application")
+            "Desktop / graphics"|"Sleep / crash"|"Update / boot"|Networking|"Flatpak / application"|Hardware)
                 for profile in "${SELECTED_PROFILES[@]}"; do
                     [[ "$profile" == "$selected" ]] && continue 2
                 done
@@ -277,7 +449,8 @@ choose_profiles() {
         "Sleep / crash" \
         "Update / boot" \
         Networking \
-        "Flatpak / application" || true)
+        "Flatpak / application" \
+        Hardware || true)
 }
 
 collect_profiles() {
@@ -314,11 +487,36 @@ collect_baseline() {
     local reproduction="$3"
     local failed_units
     local current_errors
+    local hardware_summary
+    local load_avg mem_total dmi_vendor dmi_product
 
     failed_units="$(systemctl list-units --state=failed --no-legend --plain 2>/dev/null | \
         awk '{print $1}' | head -20 | scrub_journal_log || true)"
     current_errors="$(journalctl -b 0 -p err..emerg --no-pager 2>/dev/null | \
         tail -40 | scrub_journal_log || true)"
+    hardware_summary="$(collect_hardware_summary)"
+
+    if [[ -r /proc/loadavg ]]; then
+        load_avg="$(awk '{printf "%s / %s / %s", $1, $2, $3}' /proc/loadavg)"
+    else
+        load_avg="unknown"
+    fi
+    if command -v free &>/dev/null; then
+        mem_total="$(free -h --si 2>/dev/null | \
+            awk '/^Mem:/{print $3" used / "$2" total"}' || true)"
+    fi
+    mem_total="${mem_total:-unavailable}"
+    local dmi_id_path="${DMI_ID_PATH:-/sys/class/dmi/id}"
+    if [[ -r "$dmi_id_path/sys_vendor" ]]; then
+        dmi_vendor="$(< "$dmi_id_path/sys_vendor")"
+    else
+        dmi_vendor="unknown"
+    fi
+    if [[ -r "$dmi_id_path/product_name" ]]; then
+        dmi_product="$(< "$dmi_id_path/product_name")"
+    else
+        dmi_product="unknown"
+    fi
 
     {
         printf '## %s\n\n' "$BONEDIGGER_BRAND"
@@ -333,7 +531,12 @@ collect_baseline() {
         printf '| Flavor | `%s` |\n' "$IMAGE_FLAVOR"
         printf '| Kernel | `%s` |\n' "$(uname -r)"
         printf '| Architecture | `%s` |\n' "$(uname -m)"
-        printf '| Booted digest | `%s` |\n\n' "$BOOTED_DIGEST"
+        printf '| Booted digest | `%s` |\n' "$BOOTED_DIGEST"
+        printf '| Load (1m / 5m / 15m) | `%s` |\n' "$load_avg"
+        printf '| Memory | %s |\n' "$mem_total"
+        printf '| DMI vendor / product | `%s` / `%s` |\n\n' "$dmi_vendor" "$dmi_product"
+        printf '### Hardware summary\n\n'
+        printf '%s\n' "$hardware_summary"
         printf '### Failed systemd units\n\n'
         if [[ -n "$failed_units" ]]; then
             printf '%s\n' "$failed_units" | sed 's/^/- /'
@@ -344,6 +547,75 @@ collect_baseline() {
     } > "$DRAFT_DIR/issue.md"
     printf '%s\n' "$title" > "$DRAFT_DIR/title.txt"
     limit_file "$DRAFT_DIR/issue.md" "$MAX_BASELINE_CONTENT_BYTES"
+}
+
+# Compact hardware overview for the baseline summary table: CPU model,
+# GPU identity, total memory, root disk model and size, network interface
+# list. Output is short (one line per item, Markdown-friendly), PII-
+# scrubbed, and tolerant of any single probe being missing — a missing
+# probe is reported as `_unavailable_` so triage can still see what was
+# actually probed. projectbluefin/common#1338.
+collect_hardware_summary() {
+    local cpu_model gpu_lines gpu_short mem_line disk_line net_line
+    local dmi_id_path="${DMI_ID_PATH:-/sys/class/dmi/id}"
+    local sys_class_net="${SYS_CLASS_NET_PATH:-/sys/class/net}"
+
+    if command -v lscpu &>/dev/null; then
+        cpu_model="$(lscpu 2>/dev/null | awk -F: '/^Model name/{sub(/^[[:space:]]+/, "", $2); print $2; exit}')"
+    elif [[ -r /proc/cpuinfo ]]; then
+        cpu_model="$(awk -F: '/^model name/{sub(/^[[:space:]]+/, "", $2); print $2; exit}' /proc/cpuinfo)"
+    fi
+    cpu_model="${cpu_model:-_unavailable_}"
+
+    if command -v lspci &>/dev/null; then
+        gpu_lines="$(lspci 2>/dev/null | grep -iE 'VGA|Display|3D controller|2D controller' || true)"
+    else
+        gpu_lines=""
+    fi
+    if [[ -n "$gpu_lines" ]]; then
+        gpu_short="$(printf '%s\n' "$gpu_lines" | head -1)"
+        gpu_short="${gpu_short#*: }"
+        gpu_short="${gpu_short:-_unavailable_}"
+    else
+        gpu_short="_none detected_"
+    fi
+
+    if command -v free &>/dev/null; then
+        mem_line="$(free -h --si 2>/dev/null | awk '/^Mem:/{print $2" total / "$7" available"}' || true)"
+    else
+        mem_line=""
+    fi
+    mem_line="${mem_line:-_unavailable_}"
+
+    if command -v lsblk &>/dev/null; then
+        disk_line="$(lsblk -d -o NAME,SIZE,MODEL -n 2>/dev/null \
+            | awk '!/^(loop|sr|zd)/ {print $1" "$2" "$3}' | head -3 \
+            | paste -sd, - || true)"
+    else
+        disk_line=""
+    fi
+    disk_line="${disk_line:-_unavailable_}"
+
+    local -a net_ifaces=()
+    local iface
+    if [[ -d "$sys_class_net" ]]; then
+        for iface in "$sys_class_net"/*; do
+            [[ -e "$iface" ]] || continue
+            net_ifaces+=("$(basename "$iface")")
+        done
+    fi
+    net_line="$(printf '%s\n' "${net_ifaces[@]}" | grep -v '^lo$' | sort -u | paste -sd, - || true)"
+    net_line="${net_line:-_unavailable_}"
+
+    cat <<EOF
+| Item | Value |
+| --- | --- |
+| CPU | \`${cpu_model}\` |
+| GPU | \`${gpu_short}\` |
+| Memory | ${mem_line} |
+| Disks | \`${disk_line}\` |
+| Network interfaces | \`${net_line}\` |
+EOF
 }
 
 collect_feature_body() {
