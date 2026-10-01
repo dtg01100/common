@@ -1,17 +1,16 @@
 just := just_executable()
 
-# test_libvirt_helper.bats is excluded — requires a running libvirtd session
+# test_libvirt_helper.bats is excluded — it runs unconditionally in CI (unit-tests.yml); the suite needs only a temp HOME, not a libvirtd session
 # Every suite in tests/ must be listed below or declared excluded above with a
 # reason; tests/test_suite_registration.bats enforces that.
 # Run unit tests (pytest for hooks.py, bats for shell scripts)
 test:
-    python3 -m pytest tests/test_hooks.py tests/test_check_oci_refs.py tests/test_curated_config.py tests/test_skill_docs.py tests/test_chairlift_config.py tests/test_renovate_config.py tests/test_render_hidamari_movie.py -v --cov=tests --cov-report=term-missing
+    python3 -m pytest tests/test_hooks.py tests/test_check_oci_refs.py tests/test_check_printer_app_versions.py tests/test_curated_config.py tests/test_skill_docs.py tests/test_chairlift_config.py tests/test_renovate_config.py tests/test_render_hidamari_movie.py tests/test_actions_security.py -v --cov=tests --cov-report=term-missing
     bats tests/test_libsetup.bats
     bats tests/test_setup_scripts.bats
     bats tests/test_privileged_setup.bats
     bats tests/test_bling.bats
     bats tests/test_bling_sh.bats
-    bats tests/test_bluefin_countme.bats
     bats tests/test_bling_preexec_rearm.bats
     bats tests/test_luks_tpm2.bats
     bats tests/test_rechunker_group_fix.bats
@@ -24,6 +23,7 @@ test:
     bats tests/test_ublue_fastfetch.bats
     bats tests/test_motd_integration.bats
     bats tests/test_clean_system_podman_path.bats
+    bats tests/test_clean_system_bootc.bats
     bats tests/test_default_just.bats
     bats tests/test_ublue_image_info.bats
     bats tests/test_profile_d.bats
@@ -47,8 +47,8 @@ test:
     bats tests/test_damask_service.bats
     bats tests/test_suite_registration.bats
     bats tests/test_shared_just.bats
-    bats tests/test_bluefin_countme.bats
     bats tests/test_escl_fixture.bats
+    bats tests/test_projectbluefin_countme.bats
 
 # Preview Bazaar config from this checkout on the local machine
 bazaar-preview:
