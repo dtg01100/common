@@ -45,13 +45,13 @@ each already a known per-repo enforcement point:
 
 | Surface | Where it lives today | What enforces it today |
 |---|---|---|
-| Bluefin RPM package set | `packages/bluefin.toml` (copied byte-for-byte from `projectbluefin/bluefin`) | `build_files/shared/install-packages.py` re-resolves locally; `scripts/verify-rpm-contract.py` asserts presence |
+| Bluefin RPM package set | `packages/bluefin.toml` (a snapshot of `projectbluefin/bluefin`'s `build_files/packages/base.toml`) | `scripts/install-packages.py` re-resolves locally; `scripts/verify-rpm-contract.py` asserts presence |
 | Bluefin desktop surface | `contracts/bluefin-desktop.toml` (branding + os-release + Flatpak policy + services) | `scripts/verify-desktop-contract.py` |
 | Image identity vocabulary | Per-repo `image-info.json` writers (six writers across three repos) | None at the contract level; only the readers in `common` are shared — see [`docs/skills/image-identity.md`](../skills/image-identity.md) |
 
 The issue is correct that **nothing forces these to agree with what
 classic Bluefin, Bluefin LTS, Aurora, or the next Bluefin actually
-ship**. `projectbluefin/bluefin`'s `packages/bluefin.toml` is the
+ship**. `projectbluefin/bluefin`'s `build_files/packages/base.toml` is the
 provenance; Utah's copy is a snapshot of it at some past fork point. A
 package dropped upstream, a renamed service, or a changed default is
 discovered by hand, per repo, if at all.
@@ -97,8 +97,9 @@ The issue asks: one contract file vs. split?
 
 Both patterns already exist in this repo and in the consumers:
 
-- `packages/bluefin.toml` is **one** TOML file in
-  `projectbluefin/bluefin`, copied verbatim into Utah.
+- `build_files/packages/base.toml` is **one** TOML file in
+  `projectbluefin/bluefin`, snapshotted into Utah as
+  `packages/bluefin.toml`.
 - `contracts/bluefin-desktop.toml` is **one** TOML file in Utah.
 - [`docs/skills/image-identity.md`](../skills/image-identity.md) splits
   identity vocabulary into a five-key table, owned as a single layer.
@@ -108,7 +109,7 @@ Option A:
 
 | File (in `tests/contracts/bluefin/` or `system_files/shared/contracts/bluefin/`) | Owner | Mirrors today's Utah file |
 |---|---|---|
-| `packages.toml` | **common** (consumes bluefin's TOML via Renovate or a curated sync) | `packages/bluefin.toml` |
+| `packages.toml` | **common** (consumes `projectbluefin/bluefin`'s `build_files/packages/base.toml` via Renovate or a curated sync) | `packages/bluefin.toml` |
 | `desktop.toml` | **common** (branding, os-release, schemas, Flatpak policy, services) | `contracts/bluefin-desktop.toml` |
 | `identity.toml` (or extend the existing `image-info.json` schema doc) | **common** — already partial via `docs/skills/image-identity.md` | (no per-repo equivalent today) |
 
@@ -157,9 +158,17 @@ The contract data should follow the same shape:
    contract. Drift between contract change and image publication is
    the same drift as today.
 
-This matches the existing `actions/bootc-build/setup-runner` SHA-pinning
-convention and the factory's `@v1`-for-first-party / SHA-for-third-party
-split documented in `AGENTS.md`.
+The precedent for pinning a first-party artifact by digest is Utah's own
+`Containerfile`, which pins the `common` image by digest
+(`COMMON_IMAGE_SHA`) and consumes it with `FROM
+${COMMON_IMAGE}@${COMMON_IMAGE_SHA}`. Note that this is **not** the
+`uses:` SHA-pinning policy in
+[`docs/skills/ci-tooling/SKILL.md`](../skills/ci-tooling/SKILL.md): that
+policy requires SHA pins for *third-party* actions and explicitly
+exempts internal `projectbluefin/` refs, which use managed floating tags
+(`@main`/`@v1`). Contract data is an artifact consumed by a build, not a
+workflow `uses:` ref, so the digest-pin precedent applies and the
+floating-tag exemption does not.
 
 ## 6. Enforcement points (issue open question 3)
 
@@ -296,6 +305,6 @@ the following are addressed:
 - Utah's existing per-repo enforcement:
   `scripts/verify-rpm-contract.py`,
   `scripts/verify-desktop-contract.py`,
-  `build_files/shared/install-packages.py`
+  `scripts/install-packages.py`
 - Bluefin's existing per-repo data:
-  `packages/bluefin.toml` in `projectbluefin/bluefin`
+  `build_files/packages/base.toml` in `projectbluefin/bluefin`
