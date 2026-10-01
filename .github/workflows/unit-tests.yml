@@ -1,0 +1,218 @@
+name: Unit Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "system_files/**"
+      - "tests/**"
+      - "scripts/**"
+      - "Justfile"
+      - ".github/workflows/unit-tests.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "system_files/**"
+      - "tests/**"
+      - "scripts/**"
+      - "Justfile"
+      - ".github/workflows/unit-tests.yml"
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Homebrew environment and test dependencies
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          echo "$(/home/linuxbrew/.linuxbrew/bin/brew --prefix)/bin" >> "$GITHUB_PATH"
+          brew install bats-core fish zsh
+          pip install pytest pytest-cov pyyaml jsonschema numpy
+
+      - name: Install just
+        uses: taiki-e/install-action@b6a061addd82b81aaeca51bdf2c53cd707996e5a # just
+        with:
+          tool: just
+
+      - name: Run shellcheck — extensionless scripts
+        run: |
+          shellcheck \
+            system_files/shared/usr/bin/ublue-system-setup \
+            system_files/shared/usr/bin/ublue-user-setup \
+            system_files/shared/usr/bin/ublue-privileged-setup \
+            system_files/shared/usr/bin/ublue-bling \
+            system_files/shared/usr/bin/luks-tpm2-autounlock \
+            system_files/shared/usr/bin/ublue-fastfetch \
+            system_files/shared/usr/lib/ublue/setup-services/libsetup.sh \
+            system_files/bluefin/usr/libexec/bluefin-dynamic-wallpaper \
+            system_files/bluefin/usr/libexec/get-geoclue-latitude
+
+      - name: Run shellcheck — .sh scripts
+        run: find system_files -name '*.sh' -print0 | xargs -0 shellcheck -e SC1091
+
+      - name: Run bats (suite registration drift gate)
+        run: bats tests/test_suite_registration.bats
+
+      - name: Run pytest (hooks.py)
+        run: python3 -m pytest tests/test_hooks.py tests/test_chairlift_config.py -v --cov=system_files/bluefin/etc/bazaar --cov-report=term-missing --cov-report=xml:coverage.xml --cov-report=html:coverage-html --cov-fail-under=80
+
+      - name: Run pytest (scripts and config validators)
+        run: |
+          python3 -m pytest \
+            tests/test_curated_config.py \
+            tests/test_check_oci_refs.py \
+            tests/test_skill_docs.py \
+            -v
+
+      - name: Run pytest (Hidamari movie generator)
+        run: python3 -m pytest tests/test_render_hidamari_movie.py -v
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            coverage-html/
+          retention-days: 7
+
+      - name: Run bats (libsetup.sh)
+        run: bats tests/test_libsetup.bats
+
+      - name: Run bats (setup scripts)
+        run: bats tests/test_setup_scripts.bats
+
+      - name: Run bats (privileged setup)
+        run: bats tests/test_privileged_setup.bats
+
+      - name: Run bats (ublue-bling)
+        run: bats tests/test_bling.bats
+
+      - name: Run bats (ujust completion)
+        run: bats tests/test_ujust_completion.bats
+
+      - name: Run bats (bling.sh)
+        run: bats tests/test_bling_sh.bats
+
+      - name: Run bats (luks-tpm2-autounlock)
+        run: bats tests/test_luks_tpm2.bats
+
+      - name: Run bats (rechunker-group-fix)
+        run: bats tests/test_rechunker_group_fix.bats
+
+      - name: Run bats (ublue-bling-fastfetch)
+        run: bats tests/test_bling_fastfetch.bats
+
+      - name: Run bats (changelog.just)
+        run: bats tests/test_changelog.bats
+
+      - name: Run bats (update.just and native recipes)
+        run: bats tests/test_update_just.bats tests/test_native_recipes.bats
+
+      - name: Run bats (ublue-fastfetch)
+        run: bats tests/test_ublue_fastfetch.bats
+
+      - name: Run bats (motd integration)
+        run: bats tests/test_motd_integration.bats
+
+      - name: Run bats (ublue-image-info.sh)
+        run: bats tests/test_ublue_image_info.bats
+
+      - name: Run bats (profile.d — caffeinate.sh + uutils.sh)
+        run: bats tests/test_profile_d.bats
+
+      - name: Run bats (bluefin-dynamic-wallpaper)
+        run: bats tests/test_dynamic_wallpaper.bats
+
+      - name: Run bats (get-geoclue-latitude)
+        run: bats tests/test_geoclue_latitude.bats
+
+      - name: Run bats (brew-preinstall)
+        run: bats tests/test_brew_preinstall.bats
+
+      - name: Run bats (damask service and flatpak overrides)
+        run: bats tests/test_damask_service.bats
+
+      - name: Test Brewfile validator
+        run: |
+          shellcheck scripts/validate-brewfiles.sh tests/test_validate_brewfiles.bats
+          bats tests/test_validate_brewfiles.bats
+
+      - name: Run bats (oem-brew hook)
+        run: bats tests/test_oem_brew.bats
+
+      - name: Run bats (damask-setup hook)
+        run: bats tests/test_damask_setup.bats
+
+      - name: Run bats (bonedigger report)
+        run: bats tests/test_bonedigger_report.bats
+
+      - name: Run bats (apps.just — install-opentabletdriver, cncf)
+        run: bats tests/test_apps_just.bats
+      - name: Run bats (escl-fixture)
+        run: bats tests/test_escl_fixture.bats
+      - name: Run bats (escl-fixture)
+        run: bats tests/test_escl_fixture.bats
+
+      - name: Run bats (bling preexec re-arm)
+        run: bats tests/test_bling_preexec_rearm.bats
+
+      - name: Run bats (bluefin-countme)
+        run: bats tests/test_bluefin_countme.bats
+
+      - name: Run bats (brew tap trust)
+        run: bats tests/test_brew_tap_trust.bats
+
+      - name: Run bats (clean-system podman path)
+        run: bats tests/test_clean_system_podman_path.bats
+
+      - name: Run bats (default.just)
+        run: bats tests/test_default_just.bats
+
+      - name: Run bats (dynamic wallpaper hook)
+        run: bats tests/test_dynamic_wallpaper_hook.bats
+
+      - name: Run bats (hardware hooks)
+        run: bats tests/test_hardware_hooks.bats
+
+      - name: Run bats (ublue-image-repo)
+        run: bats tests/test_image_repo.bats
+
+      - name: Run bats (libvirt helper)
+        run: bats tests/test_libvirt_helper.bats
+
+      - name: Run bats (shared.just)
+        run: bats tests/test_shared_just.bats
+
+      - name: Run bats (system.just)
+        run: bats tests/test_system_just.bats
+
+      - name: Run bats (theming hook)
+        run: bats tests/test_theming_hook.bats
+
+      - name: Run bats (ujust)
+        run: bats tests/test_ujust.bats
+
+      - name: Run bats (uwelcome profile)
+        run: bats tests/test_uwelcome_profile.bats
+
+      - name: Smoke-test brew bundle accepts preinstall Brewfile (real Homebrew)
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew bundle list --file=system_files/shared/usr/share/ublue-os/homebrew/preinstall.d/system-cli.Brewfile
