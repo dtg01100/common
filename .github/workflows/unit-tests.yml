@@ -76,6 +76,7 @@ jobs:
           python3 -m pytest \
             tests/test_curated_config.py \
             tests/test_check_oci_refs.py \
+            tests/test_check_printer_app_versions.py \
             tests/test_skill_docs.py \
             -v
 
