@@ -56,9 +56,16 @@ shape: `on: issues.opened, issue_comment.created`, `permissions: issues:
 write, contents: read`, `secrets: inherit`). `bluefin-lts` and `dakota` call
 the same reusable workflow but with a broader trigger (`issues:
 [opened, labeled, closed]`, `pull_request: [opened]`, and a daily schedule)
-and also grant `pull-requests: write`; `dakota` currently pins bonedigger at a
-feature-branch build (`aa31855`, `feat/clanker-queue-rollout`) rather than a
-released ref, so its caller should not be read as the reference shape. As of
+and also grant `pull-requests: write`. `knuckle` sits between the two: it
+widens the issue trigger and adds a daily schedule (`issues: [opened,
+labeled, closed]`, `issue_comment: [created]`, `schedule`) but has no
+`pull_request` trigger and keeps `bluefin`'s `issues: write, contents: read`
+permissions. The retention pins differ: `dakota` pins the newest retained
+build (`9c5faf6`,
+[bonedigger#36](https://github.com/projectbluefin/bonedigger/pull/36)), while
+`bluefin`, `bluefin-lts`, and `knuckle` all pin the older `d530767`
+([bonedigger#26](https://github.com/projectbluefin/bonedigger/pull/26)), so
+those three lag `dakota` in lifecycle behavior. As of
 this writing that reusable workflow scopes only to `ujust report` intake,
 confirm-based priority escalation (`priority/p0`/`priority/p1`), and the
 agent-donation fast track (`status/approved`, `status/queued`,

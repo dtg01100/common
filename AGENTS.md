@@ -58,7 +58,7 @@ state by hand or invent transitions that are not implemented in the checkout.
   scope. Never write to `ublue-os/*`.
 - **Reusable lifecycle automation** belongs to `projectbluefin/bonedigger`
   (`.github/workflows/lifecycle.yml`, called as a pinned reusable workflow —
-  see `bluefin`, `bluefin-lts`, and `dakota`'s `.github/workflows/bonedigger.yml`
+  see `bluefin`, `bluefin-lts`, `dakota`, and `knuckle`'s `.github/workflows/bonedigger.yml`
   callers). It now scopes to `ujust report` intake, confirm-based priority
   escalation, and the agent-donation fast track — it does not run the general
   `1-triage` -> `3-human-queue`/`3-clanker-queue` admission for ordinary
