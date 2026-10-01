@@ -282,3 +282,49 @@ MOCK
     [ "${status}" -eq 0 ]
     grep -qF "systemctl enable uupd.timer" "${COMMAND_LOG}"
 }
+
+# Regression contract for projectbluefin/common#1332:
+# `bootc upgrade` must be invoked as a plain verb. Adding --transport
+# containers-storage (or any explicit transport) would force the broken
+# `pull_unified` path even when the image is not in bootc storage, and
+# adding --unified-storage / --soft-reboot / --apply would change the
+# staged-deployment semantics that `bootc-update-stage` and ChairLift
+# rely on. The recipe may also chain `|| exit $?]` after the verb —
+# that is just-error handling, not a bootc flag.
+@test "update: invokes plain 'sudo bootc upgrade' with no extra bootc flags (issue #1332)" {
+    # Static check on the recipe: tokenize each line that runs the bootc verb
+    # and reject any actual bootc flag (a token starting with `--`).
+    run bash -c '
+        set -euo pipefail
+        bad=0
+        while IFS= read -r line; do
+            case "${line}" in
+                *"sudo bootc upgrade"*)
+                    # Take everything after the bare verb.
+                    tail="${line##*sudo bootc upgrade}"
+                    # Drop just-recipe error handling / terminators / comments.
+                    tail="${tail%%||*}"
+                    tail="${tail%%]*}"
+                    tail="${tail%%#*}"
+                    # Any whitespace-separated token starting with "--" is a
+                    # bootc flag; that is the regression we are guarding.
+                    for tok in ${tail}; do
+                        case "${tok}" in
+                            --*)
+                                echo "REJECTED flag '${tok}' in: '${line}'" >&2
+                                bad=1
+                                ;;
+                        esac
+                    done
+                    ;;
+            esac
+        done < "$1"
+        exit "${bad}"
+    ' _ "${UPDATE_JUST}"
+    [ "${status}" -eq 0 ]
+
+    # End-to-end: the recipe passes the bare verb to the bootc mock.
+    _run "${UPDATE_SCRIPT}"
+    [ "${status}" -eq 0 ]
+    grep -qFx "sudo bootc upgrade" "${COMMAND_LOG}"
+}

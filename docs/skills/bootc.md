@@ -1,7 +1,7 @@
 ---
 name: bootc
-version: "1.0"
-last_updated: "2026-06-23"
+version: "1.1"
+last_updated: "2026-10-01"
 id: bootc
 one_line_purpose: Work with bootc image build, update, and Containerfile mechanics.
 entry_point: docs/skills/bootc.md
@@ -108,6 +108,72 @@ Source: bootc docs → "Filesystem layout" (resolve via Context7).
 If a task involves `bootc update`, `bootc switch`, or how users move between
 image streams, read the bootc docs for the current flag set and behavior.
 These change between releases. Training data will be wrong.
+
+### Known bug: `bootc upgrade` fails with `readlink /var/lib/containers/storage/overlay/diff`
+
+**Reported in `projectbluefin/common#1332`** (booted
+`ostree-image-signed:docker://ghcr.io/projectbluefin/utah:testing-20260928-ce09ef7`,
+bootc 1.12.1, Fedora 44). Symptom:
+
+```
+error: Switching: Switching (ostree): Pulling: Importing:
+  failed to invoke method GetBlob: creating file-getter:
+  readlink /var/lib/containers/storage/overlay/diff: no such file or directory
+```
+
+**Root cause (read from bootc v1.12.1 source, not memory):**
+`crates/lib/src/cli.rs::upgrade` auto-detects whether the booted image already
+lives in bootc-owned unified storage via
+`crate::deploy::image_exists_in_unified_storage(storage, imgref)`; when true,
+it dispatches to `pull_unified`, which re-imports through the
+`containers-storage:` transport. The overlay driver's
+`Driver.DiffGetter → getDiffPath → redirectDiffIfAdditionalLayer` then calls
+`os.Readlink("/var/lib/containers/storage/overlay/diff")` against a path
+that has no `id` segment and no `diff` symlink, so the readlink fails with
+`ENOENT`. The error string is propagated verbatim by
+`layerStore.newFileGetter` ("creating file-getter: %w") and surfaces as the
+"Importing: failed to invoke method GetBlob" chain above.
+
+`bootc switch <booted-image>:<new-tag>` side-steps the bug because
+`image_exists_in_unified_storage(storage, &target)` checks the *target* ref
+— the new tag is not yet in bootc storage, so the auto-detect returns
+`false`, regular `pull` is used, and the upgrade imports cleanly via skopeo.
+
+**Action by repo:** none. The fix belongs to bootc-dev/bootc (the auto-detect
+should not pull through `containers-storage:` when the underlying overlay
+path is missing, or should not assume `diff` is a real symlink in
+`redirectDiffIfAdditionalLayer`). Not yet reported upstream as of this
+revision; this skill records the workaround and the first-party-fork can
+file the upstream bug from the description above. Do not duplicate the
+workaround in `bootc-update-stage`, `update.just`, or `ujust toggle-testing`
+— those callers already invoke plain `bootc upgrade` (the contract tested by
+`tests/test_chairlift_config.py::test_bootc_stage_script_is_executable_and_stages_only`),
+which is the upstream-recommended verb.
+
+**User-side workaround (for end-user reports):**
+
+```bash
+# Find the tag bootc would have used
+bootc status --json | jq -r '.status.booted.image.image'
+# Then switch explicitly to bypass the unified auto-detect
+sudo bootc switch ghcr.io/projectbluefin/<image>:testing-latest-tag
+```
+
+After the next image build, `bootc upgrade` resumes working because the
+previously broken auto-detect now finds the new tag absent from bootc
+storage and falls back to the working `pull` path.
+
+**Verification:**
+
+```bash
+# Confirm bootc v1.12.1 still routes through pull_unified on auto-detect
+curl -s https://raw.githubusercontent.com/bootc-dev/bootc/v1.12.1/crates/lib/src/cli.rs \
+  | grep -n "image_exists_in_unified_storage\|use_unified" | head -5
+
+# Confirm the broken path is in containers/storage overlay driver
+curl -s https://raw.githubusercontent.com/containers/storage/main/drivers/overlay/overlay.go \
+  | grep -n "redirectDiffIfAdditionalLayer\|DiffGetter" | head -5
+```
 
 ---
 
