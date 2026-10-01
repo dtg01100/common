@@ -73,7 +73,7 @@ For the workflow-by-workflow purpose map inside `common`, see [`../skills/workfl
 `3-clanker-queue` → `4-review` → merge. `blocked` and `hold` are overlays,
 not stages; there is no claim command or `done` label.
 
-Lifecycle automation lives in [`projectbluefin/bonedigger`](https://github.com/projectbluefin/bonedigger); `bluefin`, `bluefin-lts`, `dakota`, and `knuckle` own callers. `common` has none.
+Issue lifecycle is Hive-managed across the factory: the state machine, triage, and queue routing belong to Hive. `bonedigger` previously hosted the reusable `.github/workflows/lifecycle.yml` (called as a pinned `workflow_call` from each consumer's own `bonedigger.yml`); that workflow was removed from `main` in `bonedigger#40` (2026-09-29) and now survives only at the pinned commits (`d530767` for `bluefin`/`bluefin-lts`/`knuckle`, `9c5faf6` for `dakota`) the consumers retain. `common` documents the contract and consumes the configured automation; it owns no lifecycle implementation.
 Full lifecycle, epics, project board, and PR labels: [`docs/skills/label-workflow.md`](../skills/label-workflow.md)
 Substantive product planning follows the [Spektacular workflow](../skills/spektacular-workflow.md)
 and the [adoption specification](../specifications/spektacular-adoption.md)
