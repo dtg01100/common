@@ -90,13 +90,13 @@ current, provisioned or safe to reuse.
 
 ## Enforcement
 
-- **CI check:** `projectbluefin/actions`' `pat-ban.yml` checks added YAML lines
-  in that repository. Its allowlist is not a factory-wide policy or proof a
-  credential is still needed; `common` has no equivalent local pre-commit hook.
-- **Human gate:** A human considering a new credential needs a security-review
-  issue before any provisioning. Agents stop; they never propose or add it.
-- **Unreviewed use:** The reported names above remain findings for their
-  owners to verify, not additions to the approved set.
+- **Actions security baseline:** [`ACTIONS-SECURITY.md`](../../ACTIONS-SECURITY.md) defines token permissions and credential scoping across workflows.
+- **CI gate:** `pat-ban.yml` in `projectbluefin/actions` blocks any PR that introduces a `secrets.XXX` reference not in the approved list above.
+- **Human gate:** Any new secret addition is a Design gate — stop and request maintainer approval.
+- **Not automated in this repo:** there is no pre-commit hook that scans for new
+  secret names. The approved-list check is enforced only by the `pat-ban.yml` CI
+  gate, and the "in use, not yet listed" rows above are the current evidence that
+  the inventory can drift from reality between reviews.
 
 ## What to do instead of a PAT
 
