@@ -474,6 +474,86 @@ EOF
     grep -Fq 'eth0,wlan0' "$WORKDIR/hw.txt"
 }
 
+@test "collect_hardware_summary keeps multi-word disk models intact" {
+    mkdir -p "$WORKDIR/sys/class/net"
+    printf 'state\n' > "$WORKDIR/sys/class/net/eth0"
+
+    cat << 'EOF' > "$WORKDIR/bin/lsblk"
+#!/usr/bin/bash
+cat << 'LSBLK'
+nvme0n1 1.8T Samsung SSD 980 PRO 1TB
+sda 931.5G WDC WD10EZEX-08WN4A0
+LSBLK
+EOF
+    chmod +x "$WORKDIR/bin/lsblk"
+
+    run env PATH="$WORKDIR/bin:$PATH" \
+        SYS_CLASS_NET_PATH="$WORKDIR/sys/class/net" \
+        bash -c '
+            source "$1"
+            collect_hardware_summary > "$2/hw.txt"
+        ' _ "$BONEDIGGER_SCRIPT" "$WORKDIR"
+
+    [ "$status" -eq 0 ]
+    grep -Fq 'nvme0n1 1.8T Samsung SSD 980 PRO 1TB' "$WORKDIR/hw.txt"
+    grep -Fq 'sda 931.5G WDC WD10EZEX-08WN4A0' "$WORKDIR/hw.txt"
+}
+
+@test "baseline hardware probes are redacted before reaching the issue draft" {
+    mkdir -p "$WORKDIR/sys/class/dmi/id" "$WORKDIR/sys/class/net" "$WORKDIR/draft"
+    printf 'TestVendor /home/alice/brand\n' > "$WORKDIR/sys/class/dmi/id/sys_vendor"
+    printf 'TestModel /home/bob/model\n' > "$WORKDIR/sys/class/dmi/id/product_name"
+    printf 'state\n' > "$WORKDIR/sys/class/net/eth0"
+
+    cat << 'EOF' > "$WORKDIR/bin/systemctl"
+#!/usr/bin/bash
+printf ''
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/journalctl"
+#!/usr/bin/bash
+printf ''
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lscpu"
+#!/usr/bin/bash
+printf 'Model name: TestCorp from /home/alice/cpu\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lspci"
+#!/usr/bin/bash
+printf '00:02.0 VGA compatible controller: TestCorp GPU /home/alice/gpu\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/lsblk"
+#!/usr/bin/bash
+printf 'nvme0n1 1.8T TestCorp /home/alice/disk\n'
+EOF
+    cat << 'EOF' > "$WORKDIR/bin/free"
+#!/usr/bin/bash
+printf '              total        used        free      shared  buff/cache   available\nMem:           32Gi       4.0Gi        25Gi       100Mi       3.0Gi        28Gi\n'
+EOF
+    chmod +x "$WORKDIR/bin/"*
+
+    run env PATH="$WORKDIR/bin:$PATH" \
+        DMI_ID_PATH="$WORKDIR/sys/class/dmi/id" \
+        SYS_CLASS_NET_PATH="$WORKDIR/sys/class/net" \
+        bash -c '
+            source "$1"
+            DRAFT_DIR="$2"
+            IMAGE_REF="ghcr.io/projectbluefin/dakota"
+            IMAGE_TAG="testing"
+            IMAGE_VERSION="20260929"
+            IMAGE_FLAVOR="main"
+            BOOTED_DIGEST="sha256:abc"
+            collect_baseline "Test title" "Test desc" "Test repro" < /dev/null
+        ' _ "$BONEDIGGER_SCRIPT" "$WORKDIR/draft"
+
+    [ "$status" -eq 0 ]
+    ! grep -Fq '/home/alice/' "$WORKDIR/draft/issue.md"
+    ! grep -Fq '/home/bob/' "$WORKDIR/draft/issue.md"
+    grep -Fq '/home/[REDACTED]/' "$WORKDIR/draft/issue.md"
+    # Memory appears once only, in the Hardware summary table.
+    [ "$(grep -c '| Memory |' "$WORKDIR/draft/issue.md")" -eq 1 ]
+    grep -Fq '32Gi total / 28Gi available' "$WORKDIR/draft/issue.md"
+}
+
 @test "collect_hardware_summary tolerates missing probes by reporting _unavailable_" {
     cat << 'EOF' > "$WORKDIR/bin/lscpu"
 #!/usr/bin/bash
