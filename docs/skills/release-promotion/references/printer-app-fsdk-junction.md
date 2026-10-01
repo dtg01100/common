@@ -16,8 +16,10 @@ and the shared-graph contract
 > [printer-app-promotion.md](./printer-app-promotion.md) (common#1243); the
 > release-contract evidence audit is
 > [printer-app-evidence-matrix.md](./printer-app-evidence-matrix.md)
-> (common#1217). The pin itself is moved in the printer repos (one writer per
-> pin) — `common` records the baseline, it does not own the pin.
+> (common#1217). The pin itself is moved in the printer repos ([one writer
+> per pin](../../ci-tooling/references/renovate-and-tools.md#one-writer-per-pin),
+> enforced by [`scripts/check-printing-junction.py`](../../../../scripts/check-printing-junction.py))
+> — `common` records the baseline, it does not own the pin.
 
 ## The contract in one line
 
@@ -123,6 +125,10 @@ open and live in the appliance repos:
 
 ## Re-deriving this baseline
 
+[`scripts/check-printing-junction.py`](../../../../scripts/check-printing-junction.py)
+answers the pin/labels/owner questions in one pass against any fork checkout
+(or by cloning each fork's `testing` branch with `--repo`); use the loop below
+when a manual cross-check is needed for a PR review.
 ```bash
 # 1. the junction pin and the declared image labels, per repo and branch
 for r in ps-printer-app hplip-printer-app gutenprint-printer-app ghostscript-printer-app; do
