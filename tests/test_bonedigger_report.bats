@@ -372,7 +372,9 @@ EOF
     grep -Fq 'PCI devices:    2' "$WORKDIR/hardware.md"
     grep -Fq 'USB devices:    2' "$WORKDIR/hardware.md"
     grep -Fq 'wlan0' "$WORKDIR/hardware.md"
-    ! grep -Fq 'wlan0.*lo' "$WORKDIR/hardware.md"
+    grep -Fq 'Network interfaces (name only): eth0,wlan0' "$WORKDIR/hardware.md"
+    grep -Fq 'L1d cache' "$WORKDIR/hardware.md"
+    grep -Fq 'L3 cache' "$WORKDIR/hardware.md"
     grep -Fq 'TestCorp SSD' "$WORKDIR/hardware.md"
 }
 
@@ -571,6 +573,49 @@ EOF
     [ "$status" -eq 0 ]
     grep -Fq 'TestCorp' "$WORKDIR/hw.txt"
     grep -Fq '_unavailable_' "$WORKDIR/hw.txt"
+}
+
+@test "collect_hardware_summary survives a failing lscpu under set -e" {
+    mkdir -p "$WORKDIR/sys/class/net"
+    printf 'state\n' > "$WORKDIR/sys/class/net/eth0"
+
+    cat << 'EOF' > "$WORKDIR/bin/lscpu"
+#!/usr/bin/bash
+exit 1
+EOF
+    chmod +x "$WORKDIR/bin/lscpu"
+
+    run env PATH="$WORKDIR/bin:$PATH" \
+        SYS_CLASS_NET_PATH="$WORKDIR/sys/class/net" \
+        bash -c '
+            set -euo pipefail
+            source "$1"
+            collect_hardware_summary > "$2/hw.txt"
+        ' _ "$BONEDIGGER_SCRIPT" "$WORKDIR"
+
+    [ "$status" -eq 0 ]
+    grep -Fq '| CPU | `_unavailable_` |' "$WORKDIR/hw.txt"
+    grep -Fq 'eth0' "$WORKDIR/hw.txt"
+}
+
+@test "collect_hardware_summary omits VPN, tunnel, and virtual interfaces" {
+    mkdir -p "$WORKDIR/sys/class/net"
+    for iface in eth0 lo tailscale0 wg0 proton0 tun0 docker0 virbr0 veth1a2b br-abc123; do
+        printf 'state\n' > "$WORKDIR/sys/class/net/$iface"
+    done
+
+    run env PATH="$WORKDIR/bin:$PATH" \
+        SYS_CLASS_NET_PATH="$WORKDIR/sys/class/net" \
+        bash -c '
+            source "$1"
+            collect_hardware_summary > "$2/hw.txt"
+        ' _ "$BONEDIGGER_SCRIPT" "$WORKDIR"
+
+    [ "$status" -eq 0 ]
+    grep -Fq '| Network interfaces | `eth0` |' "$WORKDIR/hw.txt"
+    for hidden in tailscale0 wg0 proton0 tun0 docker0 virbr0 veth1a2b br-abc123; do
+        ! grep -Fq "$hidden" "$WORKDIR/hw.txt"
+    done
 }
 
 @test "hardware smart log is bounded by the per-profile byte cap" {

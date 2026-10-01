@@ -298,7 +298,7 @@ profile_hardware() {
     printf '### CPU\n\n```\n'
     if command -v lscpu &>/dev/null; then
         lscpu 2>/dev/null | grep -iE \
-            '^(Architecture|Model name|Vendor ID|CPU\(s\)|Thread\(s\) per core|Core\(s\) per socket|Socket\(s\)|CPU max MHz|CPU min MHz|Virtualization|L1d|L1i|L2|L3):' | \
+            '^(Architecture|Model name|Vendor ID|CPU\(s\)|Thread\(s\) per core|Core\(s\) per socket|Socket\(s\)|CPU max MHz|CPU min MHz|Virtualization|L1d cache|L1i cache|L2 cache|L3 cache):' | \
             scrub_kernel_log || true
     elif [[ -r /proc/cpuinfo ]]; then
         awk -F: '/^model name|^vendor_id|^cpu family|^cpu MHz|^cache size/ {print $1": "$2}' \
@@ -558,18 +558,20 @@ collect_baseline() {
 }
 
 # Compact hardware overview for the baseline summary table: CPU model,
-# GPU identity, total memory, root disk model and size, network interface
-# list. Output is short (one line per item, Markdown-friendly), PII-
+# GPU identity, total memory, root disk model and size, and the list of
+# physical network interface names (loopback plus VPN/tunnel/virtual
+# interfaces are filtered out because this table is always submitted).
+# Output is short (one line per item, Markdown-friendly), PII-
 # scrubbed, and tolerant of any single probe being missing — a missing
 # probe is reported as `_unavailable_` so triage can still see what was
 # actually probed. projectbluefin/common#1338.
 collect_hardware_summary() {
-    local cpu_model gpu_lines gpu_short mem_line disk_line net_line
+    local cpu_model gpu_lines gpu_short mem_line disk_line net_line net_names
 
     if command -v lscpu &>/dev/null; then
-        cpu_model="$(lscpu 2>/dev/null | awk -F: '/^Model name/{sub(/^[[:space:]]+/, "", $2); print $2; exit}' | scrub_kernel_log)"
+        cpu_model="$(lscpu 2>/dev/null | awk -F: '/^Model name/{sub(/^[[:space:]]+/, "", $2); print $2; exit}' | scrub_kernel_log || true)"
     elif [[ -r /proc/cpuinfo ]]; then
-        cpu_model="$(awk -F: '/^model name/{sub(/^[[:space:]]+/, "", $2); print $2; exit}' /proc/cpuinfo | scrub_kernel_log)"
+        cpu_model="$(awk -F: '/^model name/{sub(/^[[:space:]]+/, "", $2); print $2; exit}' /proc/cpuinfo | scrub_kernel_log || true)"
     fi
     cpu_model="${cpu_model:-_unavailable_}"
 
@@ -577,7 +579,7 @@ collect_hardware_summary() {
     if [[ -n "$gpu_lines" ]]; then
         gpu_short="$(printf '%s\n' "$gpu_lines" | head -1)"
         gpu_short="${gpu_short#*: }"
-        gpu_short="$(printf '%s\n' "$gpu_short" | scrub_kernel_log)"
+        gpu_short="$(printf '%s\n' "$gpu_short" | scrub_kernel_log || true)"
         gpu_short="${gpu_short:-_unavailable_}"
     else
         gpu_short="_none detected_"
@@ -609,8 +611,20 @@ collect_hardware_summary() {
     fi
     disk_line="${disk_line:-_unavailable_}"
 
-    net_line="$(net_interface_names | grep -v '^lo$' | sort -u | paste -sd, - || true)"
-    net_line="${net_line:-_unavailable_}"
+    # The baseline summary is always submitted, so keep VPN / tunnel /
+    # virtual interface names (tailscale0, wg0, proton0, tun0, docker0, ...)
+    # out of it — they advertise network topology the reporter never opted
+    # into sharing. The opt-in Hardware profile still lists every name.
+    # projectbluefin/common#1340.
+    net_names="$(net_interface_names || true)"
+    if [[ -z "$net_names" ]]; then
+        net_line="_unavailable_"
+    else
+        net_line="$(printf '%s\n' "$net_names" \
+            | grep -vE '^(lo|tun[0-9]*|tap[0-9]*|utun[0-9]*|wg[0-9]*|tailscale[0-9]*|proton[0-9]*|nordlynx|ipsec[0-9]*|zt[a-z0-9]*|ppp[0-9]*|docker[0-9]*|veth.*|virbr[0-9]*|vnet[0-9]*|br-.*|cni[0-9]*|flannel.*|kube.*)$' \
+            | sort -u | paste -sd, - || true)"
+        net_line="${net_line:-_none reportable_}"
+    fi
 
     cat <<EOF
 | Item | Value |
