@@ -170,7 +170,7 @@ The old `image-flavor =~ dx` gate was removed. That gate was dead once the -dx i
 
 ## Known caveats
 
-- **Docker daemon**: `brew install docker` provides the CLI. The `moby-engine` daemon must be present in the base image as a layered system package. If `dockerd` is missing, docker CLI works but containers won't run. Verify moby is in the Containerfile before shipping.
+- **Docker daemon**: `brew install docker` provides the Docker CLI. The base image ships `podman-docker` (not `moby-engine`), so the `docker` command shims to `podman` — there is no `dockerd` to start. Anything that requires a real Docker daemon must run inside a Lima guest VM (see next item) or be layered explicitly. Verify the actual `dockerd` story for any consumer that needs one before recommending the CLI alone.
 - **Lima guest runtime**: Lima uses `containerd`/`nerdctl` by default. For devcontainer workflows requiring the Docker daemon, Docker can be installed inside the Lima guest VM (`limactl shell ubuntu sudo apt-get install docker.io`).
 - **`gum choose --no-limit` section headers**: header strings (e.g. `── Docker ───`) are selectable items. They are filtered out in the summary/install logic by using specific `grep -q` patterns that don't match header text. Do not use item names that are substrings of header text.
 
