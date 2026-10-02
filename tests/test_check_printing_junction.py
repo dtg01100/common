@@ -411,10 +411,15 @@ class TestRenovate:
         }
         assert renovate_manages_junction(config) is True
 
-    def test_a_slash_wrapped_path_with_a_trailing_colon_is_not_a_regex(self):
-        # /some/path/:foo — the colon is not an inline flag character, so the
-        # whole thing falls back to the glob path. The pattern does not match
-        # the junction, so the result is no owner.
+    def test_a_slash_wrapped_path_with_a_trailing_colon_is_a_regex(self):
+        # /some/path/:foo/ — the closing slash ends the regex body, the
+        # colon is inside the regex body (so it is literal), the flag tail
+        # is empty. _split_renovate_slash_regex returns ('some/path/:foo',
+        # 0); the regex does not match the junction (elements/fsdk-
+        # containers.bst), so renovate_manages_junction sees no owner. The
+        # earlier comment claimed this "falls back to the glob path"; that
+        # was wrong — the closing slash means the pattern is taken as the
+        # regex 'some/path/:foo', not as a glob.
         config = {
             "customManagers": [
                 {"customType": "regex", "managerFilePatterns": ["/some/path/:foo/"]}
@@ -636,6 +641,35 @@ class TestCheckTree:
         tree = write_tree(tmp_path / "ps-printer-app", oci=False)
         violations = check_tree(tree, "elements/oci/ps-printer-app.bst", str(fsdk_remote))
         assert any("does not exist" in v for v in violations)
+
+    def test_a_json5_config_with_a_trailing_comma_is_refused_not_silently_misparsed(
+        self, tmp_path, fsdk_remote
+    ):
+        # Renovate reads .json5 configs (trailing commas, comments,
+        # unquoted keys). This check ships with json stdlib only, so a
+        # valid JSON5 config that needs the looser parser would raise
+        # ValueError on json.loads and be misreported as malformed. The
+        # check must surface a clear "JSON5 not supported here" message
+        # rather than silently counting the fork as Renovate-less (which
+        # would trip the fail-closed "no proposal owner" branch).
+        tree = write_tree(
+            tmp_path / "ps-printer-app",
+            remote=fsdk_remote,
+            updater=False,
+            renovate=None,
+            renovate_path="renovate.json5",
+        )
+        (tree / "renovate.json5").write_text(
+            '{\n  "extends": ["local>projectbluefin/renovate-config"],\n}\n'
+        )
+        violations = check_tree(
+            tree, "elements/oci/ps-printer-app.bst", str(fsdk_remote)
+        )
+        assert any(
+            "looks like a JSON5 config" in v
+            and "this check only parses strict JSON" in v
+            for v in violations
+        ), violations
 
 
 class TestCheckFork:

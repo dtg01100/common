@@ -93,21 +93,11 @@ QR login is intentionally out of scope.
 
 ## bonedigger — what it does NOT do
 
-<<<<<<< HEAD
-bonedigger does not own the seven-label workflow. It previously provided a slim
-`lifecycle.yml` scoped to ujust-report intake, which `bluefin`, `bluefin-lts`,
-`dakota`, and `knuckle` call through their own `bonedigger.yml`. `bonedigger#40`
-(2026-09-29) removed that file from `main`, so those callers are **retention
-pins**: each pins the full commit SHA at which `lifecycle.yml` still exists
-(`d530767` for `bluefin`, `bluefin-lts`, and `knuckle`; `9c5faf6` for `dakota`).
-Issue lifecycle is now Hive-managed. `common` has no lifecycle caller. See
-§ Integration status below.
-=======
 bonedigger does not own the seven-label workflow. The reusable `lifecycle.yml`
 workflow it once provided is now Hive-managed and survives only at the full
 commit SHAs that `bluefin`, `bluefin-lts`, `dakota`, and `knuckle` pin in
 their own `bonedigger.yml` callers. `common` has no lifecycle caller.
->>>>>>> 2e64564 (docs: correct knuckle caller shape and qualify SHA-pin rules)
+See § Integration status below.
 
 See [`label-workflow.md`](../../label-workflow.md) for the full lifecycle reference.
 

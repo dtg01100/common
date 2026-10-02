@@ -361,9 +361,10 @@ _RENOVATE_REGEX_FLAGS = {
 def _split_renovate_slash_regex(pattern: str) -> tuple[str, int] | None:
     """Split ``/regex/flags/`` into ``(expression, flags)``.
 
-    Returns ``None`` when the pattern is not slash-wrapped. Inline flag chars
-    must all be in ``[imxs]``; anything else is treated as no-flags to avoid
-    misclassifying a path that contains a colon as a regex.
+    Returns ``None`` when the pattern is not slash-wrapped, when the flag
+    tail contains anything outside `[imxs]`, or when the pattern does not
+    contain a closing slash. Callers treat ``None`` as "not a slash-regex"
+    and fall back to the glob path.
     """
     if not pattern.startswith("/") or len(pattern) < 3:
         return None
@@ -462,8 +463,27 @@ def check_tree(
         candidate = tree / relative
         if not candidate.is_file():
             continue
+        is_json5 = relative.endswith(".json5")
         try:
-            config = json.loads(candidate.read_text(encoding="utf-8"))
+            if is_json5:
+                # Renovate reads JSON5 (comments, trailing commas, unquoted
+                # keys). This script ships with json stdlib only; a valid
+                # JSON5 config that needs the looser parser would raise
+                # ValueError and be misreported as malformed. Surface a clear
+                # operator-facing violation rather than fail silently.
+                text = candidate.read_text(encoding="utf-8")
+                try:
+                    config = json.loads(text)
+                except ValueError as error:
+                    violations.append(
+                        f"{candidate} looks like a JSON5 config; this check "
+                        f"only parses strict JSON. Either drop a sibling "
+                        f"renovate.json or install python3-json5 and re-run. "
+                        f"Parser error: {error}"
+                    )
+                    break
+            else:
+                config = json.loads(candidate.read_text(encoding="utf-8"))
         except (OSError, ValueError) as error:
             raise Failure(f"cannot read {candidate}: {error}") from None
         if renovate_manages_junction(config):

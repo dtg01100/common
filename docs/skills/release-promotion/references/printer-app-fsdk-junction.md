@@ -125,6 +125,16 @@ open and live in the appliance repos:
 
 ## Re-deriving this baseline
 
+The cross-repository contract that used to require the manual loop
+below is now automated by `scripts/check-printing-junction.py` from
+common. Run it against any printer fork's `testing` branch
+(`python3 scripts/check-printing-junction.py --repo ps-printer-app`)
+and the script answers the same three questions (junction pinned to a
+full commit, OCI labels match the nested FSDK pin, only one proposal
+owner) and exits non-zero on a violation. The loop below remains for
+the case where the script cannot reach the checkout (e.g. a private
+fork or a CI environment without network).
+
 [`scripts/check-printing-junction.py`](../../../../scripts/check-printing-junction.py)
 answers the pin/labels/owner questions in one pass against any fork checkout
 (or by cloning each fork's `testing` branch with `--repo`); use the loop below
