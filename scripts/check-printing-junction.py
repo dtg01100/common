@@ -45,12 +45,15 @@ ref that is not a release-tagged FSDK pin, a failed fetch, an unreadable
 Three limits are reported rather than assumed away. Only the fork's own
 ``renovate.json`` is parsed, so a custom manager defined in an inherited preset
 (the forks extend ``local>projectbluefin/renovate-config``) is invisible here
-and an ``extends`` list is printed as a note. Nothing in CI runs this yet: it
-is a tool to run against a fork checkout, not a gate, until a workflow invokes
-it. And the pinned commit is fetched directly rather than tested for
-reachability from ``fsdk-containers`` ``stable``, so common#1246's first
-criterion -- track a reviewed stable release, not a floating branch head -- is
-only half covered here while all three forks still ``track: main``.
+and an ``extends`` list is printed as a note. Nothing in CI runs this script:
+its unit tests run in this repository's CI
+(``.github/workflows/unit-tests.yml``'s "scripts and config validators"
+step), but the script itself is a tool to run against a fork checkout, not a
+gate, until a workflow invokes it. And the pinned commit is fetched directly
+rather than tested for reachability from ``fsdk-containers`` ``stable``, so
+common#1246's first criterion -- track a reviewed stable release, not a
+floating branch head -- is only half covered here while all three forks
+still ``track: main``.
 
 Usage::
 
@@ -78,7 +81,22 @@ LABEL_REF = "io.projectbluefin.fsdk.ref"
 
 JUNCTION = "elements/fsdk-containers.bst"
 UPDATER = ".github/workflows/update-base.yml"
-RENOVATE = "renovate.json"
+# Renovate's documented config-file lookup order: a fork that drops a
+# ``renovate.json`` at the root, in ``.github/``, or under any of the
+# ``.renovaterc`` variants must still be detected as having a Renovate
+# owner. Scanning only ``renovate.json`` would miss a fork that moved
+# its config under ``.renovaterc.json`` and silently report "no
+# proposal owner" — a fail-open path in a check the docstring calls
+# fail-closed.
+RENOVATE_CONFIG_PATHS = (
+    "renovate.json",
+    "renovate.json5",
+    ".github/renovate.json",
+    ".github/renovate.json5",
+    ".renovaterc",
+    ".renovaterc.json",
+    ".renovaterc.json5",
+)
 FSDK_CONTAINERS_URL = "https://github.com/projectbluefin/fsdk-containers.git"
 FSDK_FREEDESKTOP_SDK = "elements/freedesktop-sdk.bst"
 
@@ -434,22 +452,34 @@ def check_tree(
     owners: list[str] = []
     if (tree / UPDATER).is_file():
         owners.append(UPDATER)
-    renovate_config = tree / RENOVATE
-    if renovate_config.is_file():
+    # Walk Renovate's documented config-file list (root, .github/, then the
+    # .renovaterc variants). The first hit is the file Renovate itself
+    # reads, so it is the only file this check should treat as the
+    # proposal owner. A fork that drops a ``renovate.json`` at the root
+    # must still be detected, and a fork that has moved its config under
+    # ``.renovaterc.json`` must not silently count as Renovate-less.
+    for relative in RENOVATE_CONFIG_PATHS:
+        candidate = tree / relative
+        if not candidate.is_file():
+            continue
         try:
-            config = json.loads(renovate_config.read_text(encoding="utf-8"))
+            config = json.loads(candidate.read_text(encoding="utf-8"))
         except (OSError, ValueError) as error:
-            raise Failure(f"cannot read {renovate_config}: {error}") from None
+            raise Failure(f"cannot read {candidate}: {error}") from None
         if renovate_manages_junction(config):
-            owners.append(f"a {renovate_config.name} manager")
-        elif notes is not None:
+            owners.append(f"a {candidate.name} manager")
+            break
+        if notes is not None:
             presets = renovate_extends(config)
             if presets:
                 notes.append(
-                    f"{renovate_config.name} extends {', '.join(presets)}; only this file is "
+                    f"{candidate.name} extends {', '.join(presets)}; only this file is "
                     f"read, so a manager over {JUNCTION} defined in an inherited preset would "
                     "not be seen here"
                 )
+        break  # The first config-file Renovate would read is the only
+        # one this check treats as authoritative; further candidates are
+        # not consulted.
     if not owners:
         violations.append(
             f"{tree.name} has no {UPDATER} and no Renovate manager over {JUNCTION}: nothing "

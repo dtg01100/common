@@ -84,11 +84,15 @@ def commit(remote, message):
 
 
 def write_tree(root, *, remote=None, junction_ref=None, version=FSDK_VERSION, ref=FSDK_COMMIT,
-               updater=True, oci=True, oci_element="elements/oci/ps-printer-app.bst", renovate=None):
+               updater=True, oci=True, oci_element="elements/oci/ps-printer-app.bst",
+               renovate=None, renovate_path="renovate.json"):
     """A minimal fork checkout: junction, OCI element, updater, renovate.json.
 
     ``remote`` pins the junction at a commit that remote really has, so the
-    nested FSDK pin can be read without the network.
+    nested FSDK pin can be read without the network. ``renovate_path`` lets
+    a test point the Renovate config at one of Renovate's other lookup
+    paths (``.github/renovate.json``, ``.renovaterc``, ``.renovaterc.json``,
+    ...) to prove the check scans them all.
     """
     if junction_ref is None:
         junction_ref = commit(remote, "bump") if remote else "2" * 40
@@ -112,7 +116,8 @@ def write_tree(root, *, remote=None, junction_ref=None, version=FSDK_VERSION, re
         workflows.mkdir(parents=True)
         (workflows / "update-base.yml").write_text("name: Update fsdk-containers base\n")
     if renovate is not None:
-        (root / "renovate.json").write_text(json.dumps(renovate))
+        (root / renovate_path).parent.mkdir(parents=True, exist_ok=True)
+        (root / renovate_path).write_text(json.dumps(renovate))
     return root
 
 
@@ -519,6 +524,97 @@ class TestCheckTree:
         notes: list[str] = []
         check_tree(tree, "elements/oci/ps-printer-app.bst", str(fsdk_remote), notes=notes)
         assert notes == []
+
+    @pytest.mark.parametrize(
+        "renovate_path",
+        [
+            ".github/renovate.json",
+            ".github/renovate.json5",
+            ".renovaterc",
+            ".renovaterc.json",
+            ".renovaterc.json5",
+        ],
+    )
+    def test_alternative_renovate_config_paths_are_picked_up(
+        self, tmp_path, fsdk_remote, renovate_path
+    ):
+        """Renovate looks at ``renovate.json``, then ``.github/renovate.json``
+        (and the ``.json5`` siblings), then the ``.renovaterc`` family. The
+        check must treat the first match as the proposal owner regardless of
+        which file Renovate itself would read -- a fork that moved its
+        config from the root to ``.github/`` would otherwise silently count
+        as Renovate-less and trip the fail-closed "no proposal owner"
+        branch.
+        """
+        tree = write_tree(
+            tmp_path / "ps-printer-app",
+            remote=fsdk_remote,
+            updater=False,
+            renovate={
+                "customManagers": [
+                    {
+                        "customType": "regex",
+                        "managerFilePatterns": [r"/^elements\/fsdk-containers\.bst$/"],
+                    }
+                ]
+            },
+            renovate_path=renovate_path,
+        )
+        violations = check_tree(
+            tree, "elements/oci/ps-printer-app.bst", str(fsdk_remote)
+        )
+        # One owner (the Renovate manager); no contradiction, no
+        # "nothing proposes" violation.
+        assert violations == [], violations
+
+    def test_root_renovate_json_wins_over_dot_github(self, tmp_path, fsdk_remote):
+        """When both the root ``renovate.json`` and ``.github/renovate.json``
+        exist, Renovate itself reads the root one first; this check must
+        match Renovate's order, not its own -- otherwise a fork that keeps a
+        legacy ``.github/renovate.json`` while the real config has moved to
+        the root would be evaluated against the stale file. The root file
+        here extends the org preset (no managers of its own), the
+        ``.github/`` file owns the junction; the check must prefer the root
+        file. Because the root file has no junction owner of its own and
+        only extends an inherited preset, the check reports the inherited-
+        preset note AND treats the fork as having no Renovate owner, even
+        though ``.github/renovate.json`` would have given it one. A fork
+        operator that genuinely wants Renovate to own the junction must put
+        the manager in the file Renovate itself reads.
+        """
+        tree = write_tree(
+            tmp_path / "ps-printer-app",
+            remote=fsdk_remote,
+            updater=False,
+            renovate={"extends": ["local>projectbluefin/renovate-config"]},
+        )
+        # Drop a second Renovate config under ``.github/`` that *does* own
+        # the junction. The root one is consulted first and must be treated
+        # as authoritative.
+        github_dir = tree / ".github"
+        github_dir.mkdir()
+        (github_dir / "renovate.json").write_text(
+            json.dumps(
+                {
+                    "customManagers": [
+                        {
+                            "customType": "regex",
+                            "managerFilePatterns": [
+                                r"/^elements\/fsdk-containers\.bst$/"
+                            ],
+                        }
+                    ]
+                }
+            )
+        )
+        notes: list[str] = []
+        violations = check_tree(
+            tree, "elements/oci/ps-printer-app.bst", str(fsdk_remote), notes=notes
+        )
+        # The root file is authoritative and does not own the junction, so
+        # the fork has no proposal owner -- the check reports it.
+        assert any("nothing proposes the shared junction" in v for v in violations)
+        assert any("renovate-config" in note for note in notes), notes
 
     def test_rejects_unreadable_renovate_json(self, tmp_path, fsdk_remote):
         tree = write_tree(tmp_path / "ps-printer-app", remote=fsdk_remote)
