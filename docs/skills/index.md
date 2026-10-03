@@ -37,7 +37,7 @@ Generated: 2026-10-03 · schema 1.0 · 49 skills
 | [image-identity](image-identity.md) | ci-ops | active | Decide who owns image-identity and variant metadata across the org. |
 | [image-registry](image-registry.md) | ci-ops | active | Look up projectbluefin OCI image registry paths and tags. |
 | [lab-testing](lab-testing/SKILL.md) | test-authoring | active | Boot images on the KubeVirt lab and collect test logs. |
-| [label-workflow](label-workflow.md) | meta | active | Route factory work using the canonical label workflow. |
+| [label-workflow](label-workflow.md) | meta | active | Operate the common-only issue lifecycle and preserve other repositories' local label contracts. |
 | [mime-defaults](mime-defaults.md) | test-authoring | active | Configure shared MIME default-application settings for Bluefin. |
 | [nvidia](nvidia/SKILL.md) | test-authoring | active | Maintain NVIDIA GPU support architecture and update procedures. |
 | [oem-hardware-hooks](oem-hardware-hooks/SKILL.md) | test-authoring | active | Add OEM hardware first-boot setup hooks safely. |
