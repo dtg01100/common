@@ -464,26 +464,41 @@ def check_tree(
         if not candidate.is_file():
             continue
         is_json5 = relative.endswith(".json5")
+        text = candidate.read_text(encoding="utf-8")
+        # Note: a malformed ``renovate.json`` (the canonical, strict-JSON
+        # path) raises ``Failure`` and aborts the walk because every other
+        # config file is the alternative Renovate is allowed to use, not
+        # the canonical one -- if the canonical one cannot be parsed,
+        # the rest of the lookup is unreliable. A malformed ``.json5``
+        # alternative is reported as a per-tree violation instead, so the
+        # operator can keep the fork moving by either dropping a sibling
+        # strict-JSON config or fixing the JSON5 syntax, while the rest
+        # of the check still runs against the rest of the forks.
         try:
             if is_json5:
                 # Renovate reads JSON5 (comments, trailing commas, unquoted
-                # keys). This script ships with json stdlib only; a valid
-                # JSON5 config that needs the looser parser would raise
-                # ValueError and be misreported as malformed. Surface a clear
-                # operator-facing violation rather than fail silently.
-                text = candidate.read_text(encoding="utf-8")
+                # keys). Use python3-json5 if it is installed; otherwise
+                # fall back to the strict stdlib parser and surface the
+                # mismatch to the operator rather than misreport a valid
+                # JSON5 config as malformed.
                 try:
-                    config = json.loads(text)
-                except ValueError as error:
-                    violations.append(
-                        f"{candidate} looks like a JSON5 config; this check "
-                        f"only parses strict JSON. Either drop a sibling "
-                        f"renovate.json or install python3-json5 and re-run. "
-                        f"Parser error: {error}"
-                    )
-                    break
+                    import json5 as _json5  # type: ignore[import-not-found]
+                    config = _json5.loads(text)
+                except ImportError:
+                    try:
+                        config = json.loads(text)
+                    except ValueError as error:
+                        violations.append(
+                            f"{candidate} looks like a JSON5 config; this "
+                            f"check only parses strict JSON when json5 is "
+                            f"unavailable. Drop a sibling renovate.json "
+                            f"with strict JSON, or install python3-json5 "
+                            f"so this check can parse the looser syntax. "
+                            f"Parser error: {error}"
+                        )
+                        break
             else:
-                config = json.loads(candidate.read_text(encoding="utf-8"))
+                config = json.loads(text)
         except (OSError, ValueError) as error:
             raise Failure(f"cannot read {candidate}: {error}") from None
         if renovate_manages_junction(config):
