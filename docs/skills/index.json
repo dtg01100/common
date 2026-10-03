@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-02",
+  "generated_at": "2026-10-03",
   "schema_version": "1.0",
   "skills": [
     {
@@ -261,8 +261,8 @@
         "improvement"
       ],
       "description": "Self-improving factory loop for projectbluefin. Use when identifying automation gaps, proposing workflows, or auditing ACMM maturity.",
-      "version": "1.1",
-      "last_updated": "2026-08-08",
+      "version": "1.2",
+      "last_updated": "2026-10-03",
       "doc_type": "reference"
     },
     {

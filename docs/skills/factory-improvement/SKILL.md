@@ -1,7 +1,7 @@
 ---
 name: factory-improvement
-version: "1.1"
-last_updated: "2026-08-08"
+version: "1.2"
+last_updated: "2026-10-03"
 id: factory-improvement
 one_line_purpose: Audit and propose factory self-improvement automation.
 entry_point: docs/skills/factory-improvement/SKILL.md
@@ -83,6 +83,13 @@ gh search issues --label "3-clanker-queue" --owner projectbluefin --state open \
   --json number,title,repository
 ```
 
+> `projectbluefin/common` runs its own pilot stages (`needs-triage`,
+> `triage/accepted`, `awaiting-release`, `needs-verification`) and does
+> **not** carry `1-triage` or `3-clanker-queue`. Common issues therefore do
+> not appear in these queries; query the common pilot directly when
+> triaging common work — see
+> [`../label-workflow.md`](../label-workflow.md).
+
 ---
 
 ## Pipeline Uniformity Checklist
@@ -93,7 +100,7 @@ Each factory repo must have ALL of:
 |---|---|
 | `AGENTS.md` present | `gh api repos/projectbluefin/{repo}/contents/AGENTS.md` |
 | `bonedigger.yml` wired (image repos only) | `gh api repos/projectbluefin/{repo}/contents/.github/workflows/bonedigger.yml` |
-| Canonical lifecycle labels present | `gh label list --repo projectbluefin/{repo} \| grep -E '1-triage\|3-clanker-queue'` |
+| Canonical lifecycle labels present | `gh label list --repo projectbluefin/{repo} \| grep -E '1-triage\|3-clanker-queue'` for `bluefin`, `bluefin-lts`, `dakota`, `actions`, `testsuite`. `common` runs its own pilot stages instead — see [`../label-workflow.md`](../label-workflow.md) and verify with `gh label list --repo projectbluefin/common \| grep -E 'needs-triage\|triage/accepted'`. |
 | pre-commit config present | `gh api repos/projectbluefin/{repo}/contents/.pre-commit-config.yaml` |
 | Squash-only merge | `gh repo view projectbluefin/{repo} --json squashMergeAllowed,mergeCommitAllowed` |
 
@@ -101,7 +108,7 @@ Each factory repo must have ALL of:
 
 ## What "Done" Looks Like
 
-- [ ] Every factory repo has identical infrastructure (AGENTS.md, the seven labels, pre-commit, squash-only)
+- [ ] Every factory repo has identical infrastructure (AGENTS.md, pre-commit, squash-only). `bluefin`, `bluefin-lts`, `dakota`, `actions`, and `testsuite` carry the seven canonical labels; `common` carries its pilot stages — see [`../label-workflow.md`](../label-workflow.md).
 - [ ] Every pipeline stage has a gate: pre-merge CI, post-merge e2e, promotion smoke
 - [ ] All rules exist in exactly one canonical location with one-line pointers elsewhere
 - [ ] Renovate is running across all repos
