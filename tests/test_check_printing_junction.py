@@ -671,6 +671,47 @@ class TestCheckTree:
             for v in violations
         ), violations
 
+    def test_a_json5_config_with_comments_parses_when_json5_is_available(
+        self, tmp_path, fsdk_remote, monkeypatch
+    ):
+        # When python3-json5 is installed the script must use it; a
+        # JSON5 file that needs the looser parser (here, a comment that
+        # the stdlib parser rejects) is then read without a "looks like
+        # a JSON5 config" violation. We stub json5 into sys.modules so
+        # the test runs whether or not the package is installed; the
+        # stub records which file was parsed and returns the same
+        # mapping the real package would.
+        import sys
+        import types
+
+        calls: list[str] = []
+        stub = types.ModuleType("json5")
+
+        def _loads(text):
+            calls.append(text)
+            return {"extends": ["local>projectbluefin/renovate-config"]}
+
+        stub.loads = _loads  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "json5", stub)
+        tree = write_tree(
+            tmp_path / "ps-printer-app",
+            remote=fsdk_remote,
+            updater=False,
+            renovate=None,
+            renovate_path="renovate.json5",
+        )
+        (tree / "renovate.json5").write_text(
+            '{\n  // renovate inherits the shared config\n  '
+            '"extends": ["local>projectbluefin/renovate-config"]\n}\n'
+        )
+        violations = check_tree(
+            tree, "elements/oci/ps-printer-app.bst", str(fsdk_remote)
+        )
+        assert calls == [
+            (tree / "renovate.json5").read_text(encoding="utf-8")
+        ], calls
+        assert not any("looks like a JSON5 config" in v for v in violations), violations
+
 
 class TestCheckFork:
     def test_known_fork_name_selects_its_oci_element(self, fork):
