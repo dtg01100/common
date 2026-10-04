@@ -31,7 +31,7 @@ Load this when you need to understand **what each GitHub workflow in `projectblu
 | `validate.yml` | Main PR gate: submodule drift, `just check`, shellcheck, image-registry guard, dconf parity, pre-commit | Tightening repo-local validation or policy guards |
 | `validate-brewfiles.yaml` | Validates Brewfile correctness | Changing Brewfile structure or Brewfile validation rules |
 | `validate-chairlift-config.yaml` | Checks `/usr/share/chairlift/config.yml` against the schema of the pinned ChairLift release (`CHAIRLIFT_SCHEMA_REF`, currently `v26.09.0-alpha.2`); path-filtered plus a weekly cron | Changing the ChairLift maintainer config, cask pin, or upstream schema assumptions |
-| `unit-tests.yml` | Runs `pytest` + `bats` on `system_files/**`, `tests/**`, `scripts/**`, the `Justfile`, and the workflow itself. Triggers on PR, push to `main`, and `merge_group`. | Adding or changing unit tests, or changing the paths they cover |
+| `unit-tests.yml` | Runs `pytest` + `bats` on PRs, every push to `main`, and `merge_group`, without a path filter. Docs-only main commits must produce successful CI evidence for lifecycle/Prow writes. | Adding or changing tests; preserve unfiltered main CI evidence |
 | `build.yml` | Builds and publishes the `common` OCI layer on merge. Runs parallel per-arch jobs (x86_64 on `ubuntu-24.04`, aarch64 on `ubuntu-24.04-arm`). Build uses rootless `buildah-build`; after build, `sudo skopeo copy` promotes the image into root storage so `push-image` (which uses `sudo podman push`) can find it. Then a `manifest` job assembles the multi-arch manifest, logs into GHCR, signs with keyless OIDC, generates SBOM, and attests SLSA L2. Downstream propagation is handled by Renovate (bluefin/bluefin-lts, ~3h) and dakota's daily cron — there is no direct dispatch from this workflow. | Changing how the shared layer is built or pushed |
 | `pr-e2e.yml` | Pre-merge composed-image gate for the PR's common layer (composes + runs common suite via `run-testsuite.yml`) | Changing how PR-time downstream composition is tested |
 | `e2e.yml` | Post-merge, **advisory** common-suite validation. Tests the downstream `*-testing` images (`bluefin:testing`, `dakota:testing`) — not the layer just built. Triggers on `push: main` in parallel with `build.yml`, is **not** a required check, and does **not** gate publication: `common:latest` is pushed regardless of the result. On failure it opens or updates a single tracking issue. **Bluefin LTS is deliberately excluded** while [bluefin-lts#492](https://github.com/projectbluefin/bluefin-lts/issues/492) is open — it failed every run, and GitHub does not allow `continue-on-error` on a reusable-workflow call, so it could not be soft-failed in place. LTS is still covered weekly by `promotion-candidate-e2e.yml`. | Changing shipped-layer validation after merge |
@@ -39,13 +39,35 @@ Load this when you need to understand **what each GitHub workflow in `projectblu
 | `promotion-candidate-e2e.yml` | Weekly smoke/common check against `bluefin:testing` and `bluefin:lts-testing` | Adjusting common-side signal before downstream Tuesday promotions |
 | `scorecard.yml` | Weekly OpenSSF Scorecard analysis. Runs on schedule and on push to main. Uploads SARIF to the GitHub Security tab. | Adjusting security posture reporting |
 | `release.yml` | Monthly/versioned OCI release flow. Triggered **only** by the monthly cron (`0 0 1 * *`) and `workflow_dispatch` — there is no `workflow_run` trigger on `E2E`. A cadence guard skips the run when the last release is under 20 days old or a `do-not-merge` PR is open against `main`. Uses git-cliff for changelog generation ([common#592](https://github.com/projectbluefin/common/pull/592)). | Changing versioned layer release behavior |
+| `issue-lifecycle.yml` | Single serialized shared `@v1` lifecycle/Prow caller; events reconcile targeted records, hourly repair is labels-only, explicit dispatch defaults to read-only. Writes require released source and successful current-main CI. | Changing consumer lifecycle inputs or deployment gates |
+| `issue-policy-preview.yml` | Read-only shared `@v1` preview of consumer catalog/Prow data on relevant PRs or explicit dispatch; cannot activate policy or mutate issues. | Reviewing proposed onboarding, migration, or catalog changes |
+
+### Incident reporting and deployment readiness
+
+`e2e.yml` and `promotion-candidate-e2e.yml` record the incident issue before
+calling the shared lifecycle action. That issue and its linked failed run are
+the authoritative incident record even if reconciliation is refused. The
+reconciler requires successful Unit Tests, Validate PR, and Build push runs at
+current `main`; E2E can fail while those runs are pending or red. Refusal stays
+visible as a failed step, and no backup artifact exists unless the action
+produced a backup directory. Do not bypass the guard or interpret a missing
+lifecycle comment as a missing incident.
+
+Hourly repair updates labels only; it does not retry status comments. Once
+current-main CI is green, set `INCIDENT_NUMBER` to the recorded issue number and refresh it:
+
+```bash
+gh workflow run issue-lifecycle.yml --repo projectbluefin/common -f apply=true -f issue="$INCIDENT_NUMBER"
+```
+
+Then inspect the run and the issue's role-headed status comment; dispatch alone
+is not proof that reconciliation succeeded.
 
 > **Workflows that do not exist in `common` and must not be re-added:**
 > - `backfill-pipeline.yml` — issue widget backfill. If needed, run as a local script; do not add CI plumbing for a one-shot task.
 > - `skill-drift.yml` — retired across the factory; the shared reusable it called was deleted. Process conventions are not CI gates. See `ci-tooling.md` § Skill drift detection.
 > - `docs-quality.yml` — skill frontmatter enforcement belongs in agent review, not CI.
 > - `renovate-automerge.yml` — deleted in [#783](https://github.com/projectbluefin/common/pull/783). Renovate uses `platformAutomerge: true` in `renovate.json`; GitHub's native auto-merge + merge queue replaces it. Do not re-add a workflow-based automerge mechanism.
-> - `lifecycle-caller.yml` — `common` has no lifecycle caller. Issue lifecycle is Hive-managed; downstream `bonedigger.yml` callers retain historical lifecycle pins after [bonedigger#40](https://github.com/projectbluefin/bonedigger/pull/40) removed the reusable workflow from `main`. See [label-workflow.md](label-workflow.md#ownership). Do not add a common-owned caller.
 > - `sync-codeowners.yml` — does not exist in any factory repo. Do not document or re-add it.
 
 ## Mental model
@@ -107,19 +129,18 @@ gh api repos/projectbluefin/common/rulesets --jq '.[].id' \
 
 ### Factory operations
 
-`common` runs no factory-policy workflows and owns no lifecycle implementation.
-Issue lifecycle, triage, and queue management are Hive-managed across the
-factory. `bonedigger` owns report intake and report-specific automation, not
-the general issue state machine.
+Common owns `.github/issue-policy.json`, `.github/prow.yaml`, and the
+`issue-lifecycle.yml` and read-only `issue-policy-preview.yml` callers.
+`projectbluefin/actions` owns their reusable workflows and implementation;
+both callers use managed `@v1`. Hive supplies assignment and scheduling,
+not trusted implementation acceptance. Do not duplicate the shared engine here.
 
 [bonedigger#40](https://github.com/projectbluefin/bonedigger/pull/40) removed
 `.github/workflows/lifecycle.yml` from `main`. Downstream `bonedigger.yml`
 callers retain historical pins that still resolve the removed file; those
-pins cannot be advanced to current `main`. `projectbluefin/actions` does not
-currently contain a lifecycle workflow either. See
-[label-workflow.md](label-workflow.md#ownership) for the caller and ownership
-details. Do not add a common-owned lifecycle caller or duplicate lifecycle
-logic here.
+pins cannot be advanced to current `main`. These report-intake retention pins
+are separate from Common and ChairLift's shared lifecycle adoption. See
+[label-workflow.md](label-workflow.md) for current ownership and controls.
 
 Verify this list against the checkout before trusting it:
 
