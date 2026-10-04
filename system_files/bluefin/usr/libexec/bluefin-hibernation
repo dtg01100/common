@@ -38,6 +38,45 @@ swap_size() {
         END { if (!found) exit 1 }' "$meminfo"
 }
 
+# Detect LUKS-encrypted root by inspecting the kernel command line for the
+# dracut/systemd-cryptsetup markers the installer adds. A non-zero status means
+# /var is on a LUKS volume and the swapfile will inherit that encryption.
+# projectbluefin/common#1391.
+luks_check() {
+    grep -Eq '(^| )(rd\.luks\.uuid=|rd\.luks\.name=|luks\.)' "$cmdline"
+}
+
+# On a non-LUKS host the swapfile will hold a plaintext RAM image, so surface
+# the trade-off before mutating the filesystem. An opt-in override (force=1)
+# exists for unattended provisioning where the operator has already accepted
+# the risk; absent that, the user must confirm on the controlling terminal.
+warn_unencrypted_swap() {
+    if luks_check; then
+        return
+    fi
+    cat <<'WARN' >&2
+Hibernation will write a full copy of this machine's RAM to /var/swap/swapfile.
+The disk hosting /var does not appear to be LUKS-encrypted, so secrets held in
+memory (browser cookies, SSH keys, disk-encryption passphrases, ...) will land
+unencrypted on disk and remain recoverable until the swapfile is overwritten.
+Wipe the swapfile or use a LUKS-encrypted install before relying on hibernate
+for at-rest protection.
+WARN
+    if [[ ${HIBERNATION_ACCEPT_PLAINTEXT:-0} == 1 ]]; then
+        return
+    fi
+    if command -v gum >/dev/null && [[ -t 0 || -t 1 ]]; then
+        gum confirm "Continue and write an unencrypted hibernation image?" ||
+            fail 'Aborted to keep the swapfile off an unencrypted disk.'
+    elif [[ -t 0 ]]; then
+        local reply
+        read -r -p "Continue and write an unencrypted hibernation image? [y/N] " reply
+        [[ $reply =~ ^[Yy]$ ]] || fail 'Aborted to keep the swapfile off an unencrypted disk.'
+    else
+        fail 'No controlling terminal to confirm an unencrypted hibernation image; set HIBERNATION_ACCEPT_PLAINTEXT=1 to proceed.'
+    fi
+}
+
 preflight() {
     local path
     for path in "$state" "$swapdir" "$unitfile" "$lid" "$sleep" "$suspend"; do
@@ -65,6 +104,7 @@ enable() {
     fi
     [[ ! -e $state ]] || fail 'Setup is incomplete; run ujust hibernation disable before retrying.'
     preflight
+    warn_unencrypted_swap
     local size
     size=$(swap_size)
     echo "Creating a $size swapfile. Setup failures can be cleaned up with ujust hibernation disable."
@@ -168,6 +208,8 @@ main() {
             echo 'Usage: ujust hibernation [status|enable|disable]'
             echo 'Opt-in Btrfs/UEFI hibernation with a 60-minute suspend delay.'
             echo 'GNOME controls idle timeouts. Disable removes only recipe-managed setup.'
+            echo 'Hibernation stores a RAM image in /var/swap/swapfile; on hosts'
+            echo 'without LUKS encryption that image is plaintext on disk.'
             return ;;
         status) status; return ;;
         '')

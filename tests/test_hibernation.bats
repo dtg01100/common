@@ -6,7 +6,7 @@ setup() {
     mkdir -p "$WORKDIR/bin" "$WORKDIR/efi"
     printf 'MemTotal: 8388609 kB\n' > "$WORKDIR/meminfo"
     echo 'freeze mem disk' > "$WORKDIR/power"
-    echo quiet > "$WORKDIR/cmdline"
+    echo 'quiet rd.luks.uuid=deadbeef-dead-beef-dead-beefdeadbeef' > "$WORKDIR/cmdline"
     cat > "$WORKDIR/driver" <<'DRIVER'
 #!/usr/bin/bash
 source "$HELPER"
@@ -272,4 +272,53 @@ STUB
     run just --justfile "$WORKDIR/hibernation.just" hibernation "\$(touch $WORKDIR/injected)"
     [ "$status" -ne 0 ]
     [ ! -e "$WORKDIR/injected" ]
+}
+
+# projectbluefin/common#1391
+@test "luks_check matches rd.luks.uuid and rd.luks.name markers, otherwise false" {
+    echo 'quiet rd.luks.uuid=abc' > "$WORKDIR/cmdline"
+    run "$WORKDIR/driver" luks_check
+    [ "$status" -eq 0 ]
+    echo 'quiet rd.luks.name=luks-abc' > "$WORKDIR/cmdline"
+    run "$WORKDIR/driver" luks_check
+    [ "$status" -eq 0 ]
+    echo 'quiet BOOT_IMAGE=/vmlinuz' > "$WORKDIR/cmdline"
+    run "$WORKDIR/driver" luks_check
+    [ "$status" -ne 0 ]
+}
+
+@test "help text notes the unencrypted-disk caveat" {
+    run bash "$HELPER" help
+    [ "$status" -eq 0 ]
+    [[ $output == *'LUKS'* ]]
+}
+
+@test "enable on a non-LUKS host warns and refuses when no terminal is available" {
+    echo 'quiet BOOT_IMAGE=/vmlinuz' > "$WORKDIR/cmdline"
+    run "$WORKDIR/driver" enable
+    [ "$status" -ne 0 ]
+    [[ $output == *'plaintext on disk'* || $output == *'unencrypted hibernation'* ]]
+    [ ! -e "$WORKDIR/state" ]
+}
+
+@test "enable on a non-LUKS host proceeds when HIBERNATION_ACCEPT_PLAINTEXT is set" {
+    echo 'quiet BOOT_IMAGE=/vmlinuz' > "$WORKDIR/cmdline"
+    export HIBERNATION_ACCEPT_PLAINTEXT=1
+    run "$WORKDIR/driver" enable
+    [ "$status" -eq 0 ]
+    run "$WORKDIR/driver" status
+    [ "$output" = enabled ]
+    unset HIBERNATION_ACCEPT_PLAINTEXT
+    run "$WORKDIR/driver" disable
+    [ "$status" -eq 0 ]
+}
+
+@test "LUKS-enabled cmdline skips the warning entirely" {
+    # Default cmdline already carries rd.luks.uuid= — a clean enable should
+    # produce no LUKS warning text on stderr.
+    run "$WORKDIR/driver" enable
+    [ "$status" -eq 0 ]
+    ! [[ $output == *'plaintext on disk'* ]]
+    run "$WORKDIR/driver" disable
+    [ "$status" -eq 0 ]
 }
