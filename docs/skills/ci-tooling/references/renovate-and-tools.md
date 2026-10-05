@@ -155,11 +155,22 @@ Three limits are stated rather than assumed away:
   custom manager over the junction defined in a shared preset is invisible to
   the check; an `extends` list is printed as a `note:` on stderr for that
   reason;
-- **the pinned commit is not checked for reachability from `fsdk-containers`
-  `stable`.** `common#1246`'s first criterion is that the junction tracks a
-  reviewed stable release, not a floating branch head; the check fetches the
-  pinned commit directly and all three forks still `track: main`, so "pinned
-  and immutable" is verified but "pinned to something reviewed" is not yet.
+- **the pinned commit is not checked for reachability from a stable
+  release tag.** `common#1246`'s first criterion is that the junction
+  tracks a reviewed release, not a floating branch head. `fsdk-containers`
+  has no `stable` branch; its only release-model signal is the
+  `v<version>` tag created by `publish-podman-vm`'s `gh release create` at
+  first publication, and that tag is a first-publication side effect,
+  not a reviewed-release gate, so "pinned commit ⊆ history of
+  `v<version>`" rejects every merged `main` commit between a bump and the
+  next point release (including the `printing/base.bst` work the forks
+  junction into). The check therefore verifies "pinned and immutable"
+  only and treats "pinned to a reviewed release" as a project-policy
+  decision: a maintainer can adopt a stable-release tag model upstream
+  and the script can be extended to walk that ancestry when they do.
+  See
+  [printer-app-fsdk-junction.md](../../release-promotion/references/printer-app-fsdk-junction.md#a-limit-common-cannot-check-from-code)
+  for the upstream-contract gap.
 
 ```bash
 # Against local checkouts, or by cloning each fork's testing branch:

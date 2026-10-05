@@ -206,3 +206,24 @@ done
       a short SHA) as a failure, not as a style nit: it is exactly the
       unreachable-preview case common#1239 was raised about.
 - [ ] Do not mark physical print output verified; no hardware is available.
+
+## A limit `common` cannot check from code
+
+`common#1246`'s first acceptance criterion is that the junction
+"track commits reachable from a reviewed Ghostscript `stable` release,
+not floating `testing` HEAD or a soon-deleted PR branch."
+`fsdk-containers` has no `stable` branch; its release model is the
+immutable tag set created by `publish-podman-vm`'s `gh release create`
+call at first publication. That tag is the **first-publication** side
+effect of VM-guest asset upload, not a reviewed-release gate, so
+"pinned commit ⊆ history of `v<version>`" is a false-positive generator
+on `main` — every merged PR between an FSDK bump and the next point
+release sits past the tag (including the `elements/printing/base.bst`
+work the forks junction into). `scripts/check-printing-junction.py`
+therefore limits itself to "pinned to a full commit" — verifiable and
+the necessary precondition for rollback — and leaves "pinned to a
+reviewed release" as a project-policy decision: a maintainer can adopt
+a stable-release tag model in `fsdk-containers` and the script can be
+extended to walk that ancestry when they do. The script's `--no-fetch`
+opt-out already covers offline use, so the network half is in place
+once a stable-release contract exists upstream.
