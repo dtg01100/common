@@ -50,10 +50,12 @@ its unit tests run in this repository's CI
 (``.github/workflows/unit-tests.yml``'s "scripts and config validators"
 step), but the script itself is a tool to run against a fork checkout, not a
 gate, until a workflow invokes it. And the pinned commit is fetched directly
-rather than tested for reachability from ``fsdk-containers`` ``stable``, so
-common#1246's first criterion -- track a reviewed stable release, not a
-floating branch head -- is only half covered here while all three forks
-still ``track: main``.
+rather than tested for reachability from a reviewed release ref in
+``fsdk-containers``: that repository has no ``stable`` branch, so the
+reachability test anchors on the latest release tag
+(``refs/tags/v<version>``) instead. common#1246's first criterion --
+track a reviewed release, not a floating branch head -- is only half
+covered here while all three forks still ``track: main``.
 
 Usage::
 
