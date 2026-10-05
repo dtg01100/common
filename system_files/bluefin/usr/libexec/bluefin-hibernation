@@ -220,7 +220,12 @@ main() {
         *) fail "Unknown action: $action" ;;
     esac
     if (( EUID != 0 )); then
-        exec sudo /usr/libexec/bluefin-hibernation "$action"
+        # sudo's env_reset drops caller-set vars by default; the override
+        # for unattended provisioning is the only one we have to carry
+        # through. PATH is preserved by env_keep defaults; nothing else
+        # in this script depends on caller-set env.
+        exec sudo HIBERNATION_ACCEPT_PLAINTEXT="${HIBERNATION_ACCEPT_PLAINTEXT:-}" \
+            /usr/libexec/bluefin-hibernation "$action"
     fi
     # Serialize setup and cleanup, including creation of the ownership marker.
     exec 9>/run/bluefin-hibernation.lock
