@@ -135,6 +135,12 @@ The dedicated `var-swap-swapfile.swap` unit persists activation without editing
 fstab. No kernel arguments, SELinux policy, Secure Boot settings, GNOME
 settings, or `uupd-resume.timer` are changed.
 
+If the block device backing `/var` (`findmnt -T /var`) has no `crypt` layer in
+`lsblk -s`, `enable` warns that the hibernation image will be unencrypted on
+disk and asks for confirmation on the terminal. Without a terminal it refuses
+unless `HIBERNATION_ACCEPT_PLAINTEXT=1` is set; the recipe preserves that
+variable across its `sudo` re-exec.
+
 GNOME retains its AC/battery idle timeouts. On GNOME installations, a drop-in
 makes `systemd-suspend.service` perform suspend-then-hibernate; this also affects
 other callers of that service. Lid handling uses logind's normal inhibitor and

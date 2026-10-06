@@ -36,6 +36,7 @@ echo "$name $*" >> "$WORKDIR/calls"
 case "$name" in
     findmnt)
         [[ $* != *--fstab* ]] || { echo "${FSTAB_SOURCE:-}"; exit; }
+        [[ $* != *SOURCE* ]] || { echo '/dev/mapper/luks-test[/var]'; exit; }
         echo "${FSTYPE:-btrfs}" ;;
     btrfs)
         case "$1 $2" in
@@ -64,12 +65,15 @@ case "$name" in
     swapoff)
         [[ ${STOP_FAIL:-0} == 0 && ${SWAPOFF_FAIL:-0} == 0 ]] || exit 1
         rm -f "$WORKDIR/active" ;;
+    lsblk)
+        [[ $* == *' /dev/mapper/luks-test' ]] || exit 1
+        printf '%s\n' ${VAR_TYPES:-crypt part disk} ;;
     busctl) printf 's "%s"\n' "${CAPABILITY:-yes}" ;;
     chattr|restorecon|gnome-shell) ;;
 esac
 STUB
     chmod +x "$WORKDIR/driver" "$WORKDIR/bin/stub"
-    for name in findmnt btrfs mkswap systemctl swapon swapoff busctl chattr restorecon gnome-shell; do
+    for name in findmnt lsblk btrfs mkswap systemctl swapon swapoff busctl chattr restorecon gnome-shell; do
         ln -s stub "$WORKDIR/bin/$name"
     done
     export PATH="$WORKDIR/bin:$PATH"
@@ -275,15 +279,11 @@ STUB
 }
 
 # projectbluefin/common#1391
-@test "luks_check matches rd.luks.uuid and rd.luks.name markers, otherwise false" {
-    echo 'quiet rd.luks.uuid=abc' > "$WORKDIR/cmdline"
+@test "luks_check follows /var's backing device, not the kernel cmdline" {
     run "$WORKDIR/driver" luks_check
     [ "$status" -eq 0 ]
-    echo 'quiet rd.luks.name=luks-abc' > "$WORKDIR/cmdline"
-    run "$WORKDIR/driver" luks_check
-    [ "$status" -eq 0 ]
-    echo 'quiet BOOT_IMAGE=/vmlinuz' > "$WORKDIR/cmdline"
-    run "$WORKDIR/driver" luks_check
+    echo 'quiet luks.crypttab=no' > "$WORKDIR/cmdline"
+    VAR_TYPES='part disk' run "$WORKDIR/driver" luks_check
     [ "$status" -ne 0 ]
 }
 
@@ -294,15 +294,15 @@ STUB
 }
 
 @test "enable on a non-LUKS host warns and refuses when no terminal is available" {
-    echo 'quiet BOOT_IMAGE=/vmlinuz' > "$WORKDIR/cmdline"
-    run "$WORKDIR/driver" enable
+    export VAR_TYPES='part disk'
+    run "$WORKDIR/driver" enable </dev/null
     [ "$status" -ne 0 ]
     [[ $output == *'plaintext on disk'* || $output == *'unencrypted hibernation'* ]]
     [ ! -e "$WORKDIR/state" ]
 }
 
 @test "enable on a non-LUKS host proceeds when HIBERNATION_ACCEPT_PLAINTEXT is set" {
-    echo 'quiet BOOT_IMAGE=/vmlinuz' > "$WORKDIR/cmdline"
+    export VAR_TYPES='part disk'
     export HIBERNATION_ACCEPT_PLAINTEXT=1
     run "$WORKDIR/driver" enable
     [ "$status" -eq 0 ]
@@ -313,12 +313,11 @@ STUB
     [ "$status" -eq 0 ]
 }
 
-@test "LUKS-enabled cmdline skips the warning entirely" {
-    # Default cmdline already carries rd.luks.uuid= — a clean enable should
-    # produce no LUKS warning text on stderr.
+@test "LUKS-backed /var skips the warning entirely" {
+    # The default stubs put /var on a dm-crypt volume.
     run "$WORKDIR/driver" enable
     [ "$status" -eq 0 ]
-    ! [[ $output == *'plaintext on disk'* ]]
+    [[ $output != *'unencrypted on disk'* ]]
     run "$WORKDIR/driver" disable
     [ "$status" -eq 0 ]
 }

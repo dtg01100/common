@@ -38,12 +38,14 @@ swap_size() {
         END { if (!found) exit 1 }' "$meminfo"
 }
 
-# Detect LUKS-encrypted root by inspecting the kernel command line for the
-# dracut/systemd-cryptsetup markers the installer adds. A non-zero status means
-# /var is on a LUKS volume and the swapfile will inherit that encryption.
+# Succeeds only when the block device backing /var sits on a dm-crypt volume,
+# so the swapfile inherits that encryption; non-zero means plaintext.
+# findmnt reports btrfs sources as DEV[/subvol], so strip the suffix.
 # projectbluefin/common#1391.
 luks_check() {
-    grep -Eq '(^| )(rd\.luks\.uuid=|rd\.luks\.name=|luks\.)' "$cmdline"
+    local src
+    src=$(findmnt -n -o SOURCE -T /var) || return 1
+    lsblk -s -n -o TYPE "${src%%\[*}" 2>/dev/null | grep -qx crypt
 }
 
 # On a non-LUKS host the swapfile will hold a plaintext RAM image, so surface
