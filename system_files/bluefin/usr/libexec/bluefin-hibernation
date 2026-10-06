@@ -47,9 +47,10 @@ luks_check() {
 }
 
 # On a non-LUKS host the swapfile will hold a plaintext RAM image, so surface
-# the trade-off before mutating the filesystem. An opt-in override (force=1)
-# exists for unattended provisioning where the operator has already accepted
-# the risk; absent that, the user must confirm on the controlling terminal.
+# the trade-off before mutating the filesystem. An opt-in override
+# (HIBERNATION_ACCEPT_PLAINTEXT=1) exists for unattended provisioning where
+# the operator has already accepted the risk; absent that, the user must
+# confirm on the controlling terminal.
 warn_unencrypted_swap() {
     if luks_check; then
         return
@@ -223,9 +224,14 @@ main() {
         # sudo's env_reset drops caller-set vars by default; the override
         # for unattended provisioning is the only one we have to carry
         # through. PATH is preserved by env_keep defaults; nothing else
-        # in this script depends on caller-set env.
-        exec sudo HIBERNATION_ACCEPT_PLAINTEXT="${HIBERNATION_ACCEPT_PLAINTEXT:-}" \
-            /usr/libexec/bluefin-hibernation "$action"
+        # in this script depends on caller-set env. Restrictive sudoers
+        # with env_keep -= "HIBERNATION_*" reject the assignment when the
+        # variable is unset, so only forward it then.
+        local -a sudo_env=()
+        if [[ -n ${HIBERNATION_ACCEPT_PLAINTEXT:-} ]]; then
+            sudo_env+=(HIBERNATION_ACCEPT_PLAINTEXT="$HIBERNATION_ACCEPT_PLAINTEXT")
+        fi
+        exec sudo "${sudo_env[@]}" /usr/libexec/bluefin-hibernation "$action"
     fi
     # Serialize setup and cleanup, including creation of the ownership marker.
     exec 9>/run/bluefin-hibernation.lock
