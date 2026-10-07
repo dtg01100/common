@@ -8,7 +8,13 @@ setup() {
     export STATE_DIRECTORY="${TEST_TMPDIR}/state"
     export IMAGE_INFO="${TEST_TMPDIR}/image-info.json"
     export MOCK_BIN="${TEST_TMPDIR}/bin"
-    mkdir -p "${STATE_DIRECTORY}" "${MOCK_BIN}"
+    # Default HOME_DIR to a populated temp dir so the suite is hermetic and
+    # not coupled to whatever /home happens to look like on the runner.
+    # Tests that want the live-ISO / unattended-host behaviour override
+    # HOME_DIR with an empty dir.
+    export HOME_DIR="${TEST_TMPDIR}/home"
+    mkdir -p "${STATE_DIRECTORY}" "${MOCK_BIN}" "${HOME_DIR}"
+    touch "${HOME_DIR}/.sentinel"
 
     # curl records its arguments; CURL_EXIT simulates a failed send.
     cat << 'EOF' > "${MOCK_BIN}/curl"
