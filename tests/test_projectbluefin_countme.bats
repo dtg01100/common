@@ -55,8 +55,63 @@ sent_image() {
 
 @test "a tag that is not a stream is reported as unknown" {
     image_info dakota main
-    BOOTED_REF=ghcr.io/projectbluefin/dakota:latest run "${SCRIPT}"
+    BOOTED_REF=ghcr.io/projectbluefin/dakota:next run "${SCRIPT}"
     [ "$(sent_image)" = '"image":"dakota/main:unknown"' ]
+}
+
+@test "latest from bootc is reported as a stream" {
+    image_info dakota main
+    BOOTED_REF=ghcr.io/projectbluefin/dakota:latest run "${SCRIPT}"
+    [ "$(sent_image)" = '"image":"dakota/main:latest"' ]
+}
+
+@test "Server (DDI) reports its image-tag stream without bootc" {
+    image_info server main
+    BOOTED_REF="" run "${SCRIPT}"
+    [ "$status" -eq 0 ]
+    [ "$(sent_image)" = '"image":"server/main:latest"' ]
+    [ -e "${STATE_DIRECTORY}/last" ]
+}
+
+@test "Server (DDI) skips when image-tag is empty" {
+    printf '{"image-name":"server","image-flavor":"main"}\n' > "${IMAGE_INFO}"
+    BOOTED_REF="" run "${SCRIPT}"
+    [ "$status" -eq 0 ]
+    [ ! -e "${TEST_TMPDIR}/curl.log" ]
+    [ ! -e "${STATE_DIRECTORY}/last" ]
+}
+
+@test "Server (DDI) skips when image-name is not exactly server" {
+    image_info server-foo main
+    BOOTED_REF="" run "${SCRIPT}"
+    [ "$status" -eq 0 ]
+    [ ! -e "${TEST_TMPDIR}/curl.log" ]
+}
+
+@test "bootc images do not use image-tag as a stream fallback" {
+    # dakota with no bootc image and a baked image-tag must not count — the
+    # baked tag is the compose tag, not the stream the system actually runs.
+    image_info dakota main
+    BOOTED_REF="" run "${SCRIPT}"
+    [ "$status" -eq 0 ]
+    [ ! -e "${TEST_TMPDIR}/curl.log" ]
+}
+
+@test "bootc images skip when /home is empty (live ISO, unattended host)" {
+    image_info dakota main
+    mkdir -p "${TEST_TMPDIR}/emptyhome"
+    HOME_DIR="${TEST_TMPDIR}/emptyhome" BOOTED_REF=ghcr.io/projectbluefin/dakota:stable run "${SCRIPT}"
+    [ "$status" -eq 0 ]
+    [ ! -e "${TEST_TMPDIR}/curl.log" ]
+}
+
+@test "Server (DDI) reports even when /home is empty" {
+    image_info server main
+    mkdir -p "${TEST_TMPDIR}/emptyhome"
+    HOME_DIR="${TEST_TMPDIR}/emptyhome" BOOTED_REF="" run "${SCRIPT}"
+    [ "$status" -eq 0 ]
+    [ "$(sent_image)" = '"image":"server/main:latest"' ]
+    [ -e "${STATE_DIRECTORY}/last" ]
 }
 
 @test "Bluefin Classic and LTS never contact the service" {
