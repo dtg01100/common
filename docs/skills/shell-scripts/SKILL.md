@@ -1,7 +1,7 @@
 ---
 name: shell-scripts
-version: "1.2"
-last_updated: "2026-09-23"
+version: "1.3"
+last_updated: "2026-10-07"
 id: shell-scripts
 one_line_purpose: Write and test shell scripts under system_files/.
 entry_point: docs/skills/shell-scripts/SKILL.md

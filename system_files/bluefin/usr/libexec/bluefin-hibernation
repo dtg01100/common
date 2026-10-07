@@ -41,11 +41,15 @@ swap_size() {
 # Succeeds only when the block device backing /var sits on a dm-crypt volume,
 # so the swapfile inherits that encryption; non-zero means plaintext.
 # findmnt reports btrfs sources as DEV[/subvol], so strip the suffix.
-# projectbluefin/common#1391.
+# lsblk is captured into a string here, not piped into grep -q: under
+# `set -o pipefail`, `grep -q` exits on first match and the still-writing
+# lsblk gets SIGPIPE, so the pipeline returns non-zero and an encrypted
+# host is reported as plaintext. projectbluefin/common#1391.
 luks_check() {
-    local src
+    local src types
     src=$(findmnt -n -o SOURCE -T /var) || return 1
-    lsblk -s -n -o TYPE "${src%%\[*}" 2>/dev/null | grep -qx crypt
+    types=$(lsblk -s -n -o TYPE "${src%%\[*}" 2>/dev/null) || return 1
+    grep -qx crypt <<<"${types}"
 }
 
 # On a non-LUKS host the swapfile will hold a plaintext RAM image, so surface
@@ -226,9 +230,16 @@ main() {
         # sudo's env_reset drops caller-set vars by default; the override
         # for unattended provisioning is the only one we have to carry
         # through. PATH is preserved by env_keep defaults; nothing else
-        # in this script depends on caller-set env. Restrictive sudoers
-        # with env_keep -= "HIBERNATION_*" reject the assignment when the
-        # variable is unset, so only forward it then.
+        # in this script depends on caller-set env.
+        #
+        # `VAR=value` on the sudo command line is governed by the matched
+        # rule's SETENV tag (or `ALL`), not by env_keep. Passing an empty
+        # `HIBERNATION_ACCEPT_PLAINTEXT=` on a tighter sudoers without
+        # SETENV causes sudo itself to reject with "not allowed to set
+        # the following environment variables" and *every* action
+        # (including disable) fails. Only forward the assignment when it
+        # is set; absent callers rely on the script's own warn_unencrypted_swap
+        # default.
         local -a sudo_env=()
         if [[ -n ${HIBERNATION_ACCEPT_PLAINTEXT:-} ]]; then
             sudo_env+=(HIBERNATION_ACCEPT_PLAINTEXT="$HIBERNATION_ACCEPT_PLAINTEXT")
