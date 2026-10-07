@@ -1273,6 +1273,71 @@ BREWFILE
     [ ! -f "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json" ]
 }
 
+@test "brew-preinstall: migrates a stranded legacy chairlift even when Brewfiles unchanged" {
+    # Regression: a machine that previously stamped the hash stays on the
+    # legacy cask forever — the content-addressed early-exit prevented the
+    # migration gate from ever running. The migration must succeed and
+    # exit cleanly without rewriting state, so the next run is idempotent.
+    write_rebranded_chairlift_brewfile
+    current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
+    mkdir -p "${WORKDIR}/.local/share/ublue-os"
+    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+        > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap"
+
+    BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
+    [ "${status}" -eq 0 ]
+    grep -q "brew uninstall --cask frostyard/tap/chairlift" "${WORKDIR}/brew.log"
+    grep -q "brew untap frostyard/tap" "${WORKDIR}/brew.log"
+    [[ "${output}" == *"migrating legacy chairlift"* ]]
+    [[ "${output}" != *"Brewfiles changed"* ]]
+    # State hash must stay equal to what was already stamped: no spurious
+    # bundle pass for unchanged content.
+    stored_hash="$(jq -r '.hash' "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json")"
+    [ "${stored_hash}" = "${current_hash}" ]
+}
+
+@test "brew-preinstall: stranded chairlift migration is idempotent on subsequent runs" {
+    # After a successful migration the installed cask is ublue-os/tap, so
+    # the next boot must skip migration entirely and exit via the hash
+    # early-exit. Regression guard against migration re-running on every
+    # boot after success.
+    write_rebranded_chairlift_brewfile
+    current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
+    mkdir -p "${WORKDIR}/.local/share/ublue-os"
+    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+        > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
+    write_chairlift_brew_mock ublue-os/tap 0.12.2 0.12.2 "ublue-os/tap"
+
+    BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
+    [ "${status}" -eq 0 ]
+    [[ "${output}" == *"nothing to do"* ]]
+    ! grep -q "migrating legacy chairlift" "${output}"
+    ! grep -q "brew uninstall --cask" "${WORKDIR}/brew.log"
+    stored_hash="$(jq -r '.hash' "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json")"
+    [ "${stored_hash}" = "${current_hash}" ]
+}
+
+@test "brew-preinstall: stranded chairlift migration failure on unchanged hash fails loud and leaves state unstamped" {
+    # Regression: with the migration moved before the hash check, an
+    # uninstall failure on an unchanged-hash boot must still abort the run,
+    # leave the previous state hash untouched, and exit non-zero so the
+    # next boot retries. A silent skip would strand the legacy cask.
+    write_rebranded_chairlift_brewfile
+    current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
+    mkdir -p "${WORKDIR}/.local/share/ublue-os"
+    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+        > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap" 1
+
+    run bash "${PATCHED_SCRIPT}"
+    [ "${status}" -eq 1 ]
+    [[ "${output}" == *"failed to uninstall legacy frostyard/tap/chairlift"* ]]
+    [[ "${output}" == *"will retry"* ]]
+    stored_hash="$(jq -r '.hash' "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json")"
+    [ "${stored_hash}" = "${current_hash}" ]
+}
+
 @test "brew-preinstall: external-chairlift flag skips legacy chairlift migration" {
     write_rebranded_chairlift_brewfile
     write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap"

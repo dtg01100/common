@@ -91,22 +91,14 @@ if [[ "${tap_failed}" -ne 0 ]]; then
     exit 1
 fi
 
-# Content-addressed check: hash all Brewfiles combined.
-# If unchanged, nothing else to do — fast exit without touching bundle.
-current_hash=$(cat "${brewfiles[@]}" | sha256sum | cut -d' ' -f1)
-stored_hash=$(jq -r '.hash // ""' "${STATE_FILE}" 2>/dev/null || echo "")
-
-if [[ "${current_hash}" == "${stored_hash}" ]]; then
-    echo "brew-preinstall: Brewfiles unchanged (${current_hash:0:12}...), nothing to do"
-    exit 0
-fi
-
-echo "brew-preinstall: Brewfiles changed (${current_hash:0:12}...), applying..."
-bundle_failed=0
-
-# Migrate legacy frostyard/tap/chairlift before bundling new ublue-os tap cask.
+# Migrate legacy frostyard/tap/chairlift before the content-addressed check.
 # Homebrew's cask_installed? matches on the un-namespaced token ("chairlift")
 # and skips upgrade across different taps, leaving users stranded on v0.10.1.
+#
+# Run before the hash early-exit: a previously stamped unchanged hash must not
+# permanently strand an existing legacy chairlift receipt. Migration is
+# idempotent — once the installed cask matches ublue-os/tap, subsequent runs
+# are no-ops gated on the same installed-state check.
 #
 # Gate on *installation*, not resolvability: the bare token resolves from any
 # tapped source, so a machine that merely has frostyard/tap tapped (ChairLift
@@ -170,11 +162,24 @@ if [[ "${external_chairlift}" -eq 0 ]] \
                     || echo "brew-preinstall: warning: could not untap frostyard/tap"
             fi
         else
-            echo "brew-preinstall: error: failed to uninstall legacy ${legacy_chairlift_token}"
-            bundle_failed=1
+            echo "brew-preinstall: error: failed to uninstall legacy ${legacy_chairlift_token}; state unchanged, will retry"
+            exit 1
         fi
     fi
 fi
+
+# Content-addressed check: hash all Brewfiles combined.
+# If unchanged, nothing else to do — fast exit without touching bundle.
+current_hash=$(cat "${brewfiles[@]}" | sha256sum | cut -d' ' -f1)
+stored_hash=$(jq -r '.hash // ""' "${STATE_FILE}" 2>/dev/null || echo "")
+
+if [[ "${current_hash}" == "${stored_hash}" ]]; then
+    echo "brew-preinstall: Brewfiles unchanged (${current_hash:0:12}...), nothing to do"
+    exit 0
+fi
+
+echo "brew-preinstall: Brewfiles changed (${current_hash:0:12}...), applying..."
+bundle_failed=0
 
 # Snapshot installed names before brew bundle. A declaration that was already
 # installed at this point belongs to the user unless the previous state file
