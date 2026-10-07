@@ -1276,8 +1276,10 @@ BREWFILE
 @test "brew-preinstall: migrates a stranded legacy chairlift even when Brewfiles unchanged" {
     # Regression: a machine that previously stamped the hash stays on the
     # legacy cask forever — the content-addressed early-exit prevented the
-    # migration gate from ever running. The migration must succeed and
-    # exit cleanly without rewriting state, so the next run is idempotent.
+    # migration gate from ever running. The migration must succeed, brew
+    # bundle must run to install the rebranded cask, and the state hash
+    # must stay equal to the previously stamped value so the next run is
+    # idempotent.
     write_rebranded_chairlift_brewfile
     current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
     mkdir -p "${WORKDIR}/.local/share/ublue-os"
@@ -1289,12 +1291,20 @@ BREWFILE
     [ "${status}" -eq 0 ]
     grep -q "brew uninstall --cask frostyard/tap/chairlift" "${WORKDIR}/brew.log"
     grep -q "brew untap frostyard/tap" "${WORKDIR}/brew.log"
+    # Migration uninstalls the legacy cask; brew bundle must then run so
+    # the rebranded ublue-os/tap/chairlift actually gets installed.
+    # Without this pass the machine has no ChairLift binary at all.
+    grep -q "brew bundle --file=${WORKDIR}/preinstall.d/chairlift.Brewfile" "${WORKDIR}/brew.log"
     [[ "${output}" == *"migrating legacy chairlift"* ]]
     [[ "${output}" != *"Brewfiles changed"* ]]
     # State hash must stay equal to what was already stamped: no spurious
     # bundle pass for unchanged content.
     stored_hash="$(jq -r '.hash' "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json")"
     [ "${stored_hash}" = "${current_hash}" ]
+    # The managed cask list now reflects the rebranded cask as owned by us
+    # rather than a user-installed holdover.
+    jq -e '.casks == ["ublue-os/tap/chairlift"]' \
+        "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
 }
 
 @test "brew-preinstall: stranded chairlift migration is idempotent on subsequent runs" {
