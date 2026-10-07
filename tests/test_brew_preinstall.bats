@@ -1109,10 +1109,17 @@ BREWMOCK
 # $1 installed tap: a tap name, "unknown" (installed caskfile records no tap)
 #    or "none" (ChairLift not installed)
 # $2 installed version  $3 version the new tap ships
-# $4 space-separated tapped taps  $5 exit code for `brew uninstall`
+# $4 space-separated tapped taps
+# $5 exit code for `brew uninstall`
+# $6 exit code for `brew bundle` (0 default; non-zero simulates a tap/network
+#    failure after migration has already uninstalled the legacy cask)
+# $7 exit code for `brew install --cask` (0 default; non-zero simulates the
+#    legacy rollback reinstall failing, which exercises the best-effort
+#    warning branch)
 write_chairlift_brew_mock() {
     local installed_tap="$1" installed_version="$2" tapped_version="$3"
-    local taps="$4" uninstall_rc="${5:-0}"
+    local taps="$4" uninstall_rc="${5:-0}" bundle_rc="${6:-0}"
+    local install_rc="${7:-0}"
 
     cat > "${WORKDIR}/bin/brew" << BREWMOCK
 #!/usr/bin/env bash
@@ -1166,7 +1173,8 @@ case "\$1" in
         exit 0
         ;;
     uninstall) exit ${uninstall_rc} ;;
-    bundle) exit 0 ;;
+    install) exit ${install_rc} ;;
+    bundle) exit ${bundle_rc} ;;
 esac
 BREWMOCK
     chmod +x "${WORKDIR}/bin/brew"
@@ -1297,8 +1305,9 @@ BREWFILE
     grep -q "brew bundle --file=${WORKDIR}/preinstall.d/chairlift.Brewfile" "${WORKDIR}/brew.log"
     [[ "${output}" == *"migrating legacy chairlift"* ]]
     [[ "${output}" != *"Brewfiles changed"* ]]
-    # State hash must stay equal to what was already stamped: no spurious
-    # bundle pass for unchanged content.
+    # State hash must stay equal to what was already stamped: brew bundle
+    # did run above to install the rebranded cask, but it re-stamped the
+    # same hash rather than detecting a content change.
     stored_hash="$(jq -r '.hash' "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json")"
     [ "${stored_hash}" = "${current_hash}" ]
     # The managed cask list now reflects the rebranded cask as owned by us
@@ -1355,6 +1364,95 @@ BREWFILE
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}" --external-chairlift
     [ "${status}" -eq 0 ]
     ! grep -q "brew uninstall --cask" "${WORKDIR}/brew.log"
+}
+
+@test "brew-preinstall: rollback reinstalls legacy chairlift when bundle fails after migration" {
+    # Regression reviewed on #1422: migration removed the legacy cask
+    # before bundle, then a bundle failure (network/tap outage) left the
+    # machine with no ChairLift and no retry path — the migration gate
+    # on the next boot saw no cask installed, the unchanged-hash early
+    # exit then ran, and the legacy binary was gone until some Brewfile
+    # edit changed the hash. The script must reinstall the legacy cask
+    # before exiting so the user has a working binary AND the next boot's
+    # migration gate will retry.
+    write_rebranded_chairlift_brewfile
+    current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
+    mkdir -p "${WORKDIR}/.local/share/ublue-os"
+    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+        > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
+    # bundle_rc=1 simulates a failed bundle after migration uninstalled
+    # the legacy cask; install_rc=0 means the rollback succeeds.
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap" 0 1 0
+
+    BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
+    [ "${status}" -eq 1 ]
+    [[ "${output}" == *"one or more Brewfiles failed"* ]]
+    [[ "${output}" == *"restoring legacy frostyard/tap/chairlift"* ]]
+    # Rollback reinstalls the legacy cask before exit so the user has a
+    # binary and the next boot's gate sees it installed.
+    grep -q "brew install --cask frostyard/tap/chairlift" "${WORKDIR}/brew.log"
+    # frostyard/tap is still tapped (we deferred untap until success),
+    # so the rollback install must NOT have re-tapped it — that branch
+    # only runs when frostyard was untapped during migration.
+    ! grep -Fxq "brew tap frostyard/tap" "${WORKDIR}/brew.log"
+    # State must remain the previously-stamped hash so the next boot
+    # retries (the migration gate will pick up the reinstalled legacy
+    # cask and re-migrate it on the retry).
+    stored_hash="$(jq -r '.hash' "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json")"
+    [ "${stored_hash}" = "${current_hash}" ]
+}
+
+@test "brew-preinstall: rollback re-taps frostyard/tap when migration was the one to untap" {
+    # The migration only untaps frostyard/tap after bundle succeeds, so
+    # in normal flow the tap is still present at bundle-failure time.
+    # Force the re-tap branch: have migration run while it was already
+    # missing (the "stranded after frostyard/tap is gone" scenario),
+    # then make bundle fail. The script must attempt to re-tap before
+    # the legacy restore and log a warning if the re-tap fails.
+    write_rebranded_chairlift_brewfile
+    current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
+    mkdir -p "${WORKDIR}/.local/share/ublue-os"
+    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+        > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
+    # installed_tap=unknown so migration proceeds; taps list excludes
+    # frostyard/tap, so frostyard_tapped=0 inside the script and the
+    # deferred-untap block never runs; on bundle failure the rollback
+    # path's re-tap branch fires.
+    write_chairlift_brew_mock unknown 0.10.1 0.12.2 "ublue-os/tap" 0 1 0
+
+    BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
+    [ "${status}" -eq 1 ]
+    grep -q "brew install --cask chairlift" "${WORKDIR}/brew.log"
+}
+
+@test "brew-preinstall: rollback warns loudly when legacy reinstall itself fails" {
+    # The reinstall is best-effort: a legacy-install failure must still
+    # exit 1 and surface a clear message rather than silently swallowing
+    # the failure and leaving the user with no chairlift.
+    write_rebranded_chairlift_brewfile
+    current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
+    mkdir -p "${WORKDIR}/.local/share/ublue-os"
+    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+        > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap" 0 1 1
+
+    BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
+    [ "${status}" -eq 1 ]
+    [[ "${output}" == *"could not restore legacy"* ]]
+    [[ "${output}" == *"no chairlift"* ]]
+}
+
+@test "brew-preinstall: deferred untap only runs when bundle succeeds after migration" {
+    # The legacy tap must remain tapped as long as bundle might still
+    # fail — only drop it once the rebranded cask is in. This is the
+    # happy-path mirror of the rollback tests above: a successful bundle
+    # after migration is what finally removes frostyard/tap.
+    write_rebranded_chairlift_brewfile
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap"
+
+    BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
+    [ "${status}" -eq 0 ]
+    grep -q "brew untap frostyard/tap" "${WORKDIR}/brew.log"
 }
 
 @test "brew-preinstall: never references /dev/stderr (ENXIO under systemd)" {
