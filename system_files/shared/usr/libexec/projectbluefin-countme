@@ -20,17 +20,6 @@ esac
 
 [[ -e $last ]] && (( $(date +%s) - $(stat -c %Y "$last") < 86400 )) && exit 0
 
-# `/home` is a proxy for "real booted user session"; live ISOs and unattended
-# servers have no users. The unit used to skip the service entirely with
-# ConditionDirectoryNotEmpty=/home, which silently dropped every server
-# install. Keep the skip for bootc images (Dakota/Utah) — a Dakota live ISO
-# with no users should not be counted — but let a server install through.
-# The path is overridable so bats can stub it; default is the real /home.
-home_dir="${HOME_DIR:-/home}"
-if [[ "$name" != server ]] && [[ -z "$(ls -A "$home_dir" 2>/dev/null)" ]]; then
-        exit 0
-fi
-
 # Stream comes from the booted bootc ref when one is available. Digest suffix
 # is stripped; anything outside the known channels (`stable`, `testing`,
 # `latest`) becomes `unknown`.
@@ -50,6 +39,10 @@ else
         # tag, not the stream they actually run).
         if [[ "$name" == server ]]; then
                 tag=$(jq -r '."image-tag" // empty' "$info" 2>/dev/null)
+                case $tag in
+                        stable|testing|latest|"") ;;
+                        *) tag=unknown ;;
+                esac
         fi
 fi
 [[ -n $tag ]] || exit 0

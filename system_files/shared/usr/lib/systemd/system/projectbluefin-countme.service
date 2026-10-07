@@ -3,12 +3,12 @@ Description=Send daily active-system ping to Project Bluefin
 Documentation=https://docs.projectbluefin.io/analytics
 Wants=network-online.target
 After=network-online.target
-# bootc is no longer a condition: Bluefin Server is a DDI without
-# /run/ostree-booted. The /home emptiness check used to be
-# ConditionDirectoryNotEmpty=/home, which silently dropped every server
-# install; the check now lives in the script so Server is exempt while
-# Dakota/Utah live ISOs are still skipped. ProtectHome=read-only (below)
-# keeps /home visible to that check.
+# Trigger conditions (|): run if /home is not empty OR the host is not
+# ostree-booted. Bluefin Server is a DDI without /run/ostree-booted and is
+# typically unattended (empty /home), so it is counted; bootc hosts (Dakota,
+# Utah) with an empty /home (live ISO, unattended host) are still skipped.
+ConditionDirectoryNotEmpty=|/home
+ConditionPathExists=|!/run/ostree-booted
 # Opt-out files honored by the previous bluefin-countme units.
 ConditionPathExists=!/etc/projectbluefin/countme/disabled
 ConditionPathExists=!/etc/bluefin-countme-opt-out
@@ -26,10 +26,7 @@ StateDirectory=projectbluefin-countme
 # Hardened sandbox:
 PrivateTmp=yes
 ProtectSystem=strict
-# read-only, not yes: the script reads /home to skip empty home directories
-# (live ISO / unattended bootc host). `yes` would mask /home and the skip
-# would fire unconditionally, silently dropping every Dakota/Utah install.
-ProtectHome=read-only
+ProtectHome=yes
 NoNewPrivileges=yes
 RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
 SystemCallFilter=@system-service @mount

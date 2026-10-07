@@ -8,13 +8,7 @@ setup() {
     export STATE_DIRECTORY="${TEST_TMPDIR}/state"
     export IMAGE_INFO="${TEST_TMPDIR}/image-info.json"
     export MOCK_BIN="${TEST_TMPDIR}/bin"
-    # Default HOME_DIR to a populated temp dir so the suite is hermetic and
-    # not coupled to whatever /home happens to look like on the runner.
-    # Tests that want the live-ISO / unattended-host behaviour override
-    # HOME_DIR with an empty dir.
-    export HOME_DIR="${TEST_TMPDIR}/home"
-    mkdir -p "${STATE_DIRECTORY}" "${MOCK_BIN}" "${HOME_DIR}"
-    touch "${HOME_DIR}/.sentinel"
+    mkdir -p "${STATE_DIRECTORY}" "${MOCK_BIN}"
 
     # curl records its arguments; CURL_EXIT simulates a failed send.
     cat << 'EOF' > "${MOCK_BIN}/curl"
@@ -103,21 +97,18 @@ sent_image() {
     [ ! -e "${TEST_TMPDIR}/curl.log" ]
 }
 
-@test "bootc images skip when /home is empty (live ISO, unattended host)" {
-    image_info dakota main
-    mkdir -p "${TEST_TMPDIR}/emptyhome"
-    HOME_DIR="${TEST_TMPDIR}/emptyhome" BOOTED_REF=ghcr.io/projectbluefin/dakota:stable run "${SCRIPT}"
+@test "Server (DDI) reports a non-stream image-tag as unknown" {
+    printf '{"image-name":"server","image-flavor":"main","image-tag":"20261007"}\n' > "${IMAGE_INFO}"
+    BOOTED_REF="" run "${SCRIPT}"
     [ "$status" -eq 0 ]
-    [ ! -e "${TEST_TMPDIR}/curl.log" ]
+    [ "$(sent_image)" = '"image":"server/main:unknown"' ]
 }
 
-@test "Server (DDI) reports even when /home is empty" {
-    image_info server main
-    mkdir -p "${TEST_TMPDIR}/emptyhome"
-    HOME_DIR="${TEST_TMPDIR}/emptyhome" BOOTED_REF="" run "${SCRIPT}"
-    [ "$status" -eq 0 ]
-    [ "$(sent_image)" = '"image":"server/main:latest"' ]
-    [ -e "${STATE_DIRECTORY}/last" ]
+@test "unit skips bootc hosts with empty /home but not non-ostree hosts" {
+    unit="${BATS_TEST_DIRNAME}/../system_files/shared/usr/lib/systemd/system/projectbluefin-countme.service"
+    grep -qx 'ConditionDirectoryNotEmpty=|/home' "$unit"
+    grep -qx 'ConditionPathExists=|!/run/ostree-booted' "$unit"
+    grep -qx 'ProtectHome=yes' "$unit"
 }
 
 @test "Bluefin Classic and LTS never contact the service" {

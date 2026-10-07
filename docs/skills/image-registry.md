@@ -120,12 +120,14 @@ activation and three hours after each run. The script sends at most once per
 from `bootc status` (`stable`, `testing`, `latest`, else `unknown`), never the
 baked `image-tag`. For Bluefin Server — a DDI updated by `systemd-sysupdate`
 with no bootc image — the stream is taken from `image-info.json`'s `image-tag`
-when no bootc ref is available, but only for images that are not bootc
-images; the baked `image-tag` of a bootc image is the compose tag, not the
-stream it actually runs. `/home` is checked inside the script (empty `/home`
-skips Dakota and Utah, never Server) so the unit has no `ConditionDirectoryNotEmpty=/home`
-condition and runs on unattended hosts. A failed send exits 0 and the next
-timer run retries.
+when no bootc ref is available (same `stable`/`testing`/`latest`, else
+`unknown` normalisation), but only for images that are not bootc images; the
+baked `image-tag` of a bootc image is the compose tag, not the stream it
+actually runs. The unit uses trigger conditions
+`ConditionDirectoryNotEmpty=|/home` and `ConditionPathExists=|!/run/ostree-booted`:
+bootc hosts with an empty `/home` (live ISO, unattended host) are skipped,
+while non-ostree hosts such as Server run regardless of `/home`. A failed
+send exits 0 and the next timer run retries.
 
 Opt out with `systemctl mask --now projectbluefin-countme.timer`. The previous
 opt-outs still block the service: the files `/etc/projectbluefin/countme/disabled`,
