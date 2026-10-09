@@ -34,7 +34,8 @@ Reporters never need labels or commands: just reply normally.
 2. **Read.** A maintainer or triager reads it, asks questions if needed, and fixes
    the kind (`/kind regression`) or priority (`/priority important-soon`). Issue
    closing retains Prow's maintainer/collaborator or issue-author policy.
-3. **Accepted.** When the scope is clear, a maintainer or triager comments `/triage accepted`.
+3. **Accepted.** When the scope is clear, a maintainer or triager comments
+   `/triage accepted` (note: run `/triage accepted`, not `/triage accept`).
 4. **Open to agents.** If agents may take it, a maintainer removes `needs-human`
    by hand. Prow never removes it. Leave it on when the reporter chose
    "Human interaction only" or a person must do the work.
@@ -88,7 +89,7 @@ Put each command at the start of its own line in a new comment.
 |---|---|
 | `/kind bug` (`regression`, `security`, `feature`, `documentation`, `cleanup`), `/remove-kind ...` | set or remove a kind |
 | `/area desktop` (`flatpak`, `gaming`, `hardware`, `installer`, `dx`), `/remove-area ...` | public component classification |
-| `/triage accepted`, `/remove-triage accepted` | accept or un-accept an issue |
+| `/triage accepted`, `/remove-triage accepted` | accept or un-accept an issue (exact command: `/triage accepted`, not `/triage accept`) |
 | `/priority critical-urgent` or `important-soon`, `/remove-priority ...` | set or remove a priority |
 | `/label blocked`, `/remove-label blocked` | mark or clear blocked |
 | `/hold`, `/hold cancel` | pause or release a merge |
