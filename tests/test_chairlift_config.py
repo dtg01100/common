@@ -774,11 +774,21 @@ def test_bundle_names_do_not_collide_with_other_discovered_brewfiles():
 
 def test_help_links_point_at_bluefin():
     resources = _load_config()["help_page"]["help_resources_group"]
-    for key in ("website", "issues", "chat"):
+    for key in ("website", "issues"):
         assert resources[key].startswith("https://"), f"{key} must be https"
         assert "projectbluefin.io" in resources[key], (
             f"{key} must point at a Bluefin resource"
         )
+
+
+def test_help_chat_link_is_explicitly_hidden():
+    """ChairLift titles `chat` "Ask for help"; with ask.projectbluefin.io gone
+    there is no target that does not duplicate `website`. The key must be
+    present and empty: a missing key falls back to upstream's built-in
+    default URL instead of hiding the row."""
+    resources = _load_config()["help_page"]["help_resources_group"]
+    assert "chat" in resources, "chat must be set explicitly so the default URL is not used"
+    assert resources["chat"] == "", "chat must be empty so ChairLift hides the row"
 
 
 def test_brewfile_taps_homebrew_tap_with_trust():

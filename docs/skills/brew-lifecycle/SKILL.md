@@ -150,10 +150,14 @@ launcher.
 The Custom Command Menu entry `Ask Bluefin` invokes the same wrapper with
 `--ask-bluefin`. That flag ships in ChairLift ≥ v26.10.2; on older releases
 GApplication rejects the unknown option and the menu click is a silent
-no-op. Older ChairLift pins must move to ≥ v26.10.2 (see ChairLift cask pin
-above) before any user-facing Ask Bluefin dispatcher is wired up. The
-absolute wrapper path is required because the menu runs each command through
-a non-interactive `bash -c` with no Homebrew on `PATH`.
+no-op. ChairLift's Agents-page "Show Ask Bluefin in menu" switch only
+recognises the absolute wrapper form
+(`devmenu.AskBluefinWrapperCommand`) from v26.10.3; on v26.10.2 the menu
+entry dispatches but the switch cannot hide or show it. Older ChairLift pins
+must move to ≥ v26.10.3 (see ChairLift cask pin above) for the full Ask
+Bluefin behaviour. The absolute wrapper path is required because the menu
+runs each command through a non-interactive `bash -c` with no Homebrew on
+`PATH`.
 
 ### Hand ChairLift to a dedicated installer
 
