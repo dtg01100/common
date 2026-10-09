@@ -883,6 +883,11 @@ ASK_BLUEFIN_SLOT = 11
 ASK_BLUEFIN_COMMAND = f"{CHAIRLIFT_WRAPPER} --ask-bluefin"
 
 
+_GVARIANT_MENU_TUPLE = re.compile(
+    r"\(\s*'((?:[^'\\]|\\.)*)'\s*,\s*'((?:[^'\\]|\\.)*)'\s*,\s*'((?:[^'\\]|\\.)*)'\s*,\s*(true|false)\s*\)"
+)
+
+
 def _parse_custom_command_menu() -> tuple[dict[int, tuple[str, str, str, bool]], list[int]]:
     """Parse the dconf-style key=value entries into a slot map + the order list.
 
@@ -912,14 +917,16 @@ def _parse_custom_command_menu() -> tuple[dict[int, tuple[str, str, str, bool]],
         assert body.startswith("(") and body.endswith(")"), (
             f"unexpected tuple syntax in {CUSTOM_COMMAND_MENU.name}: {raw!r}"
         )
-        parts = [p.strip() for p in body[1:-1].split(",")]
-        assert len(parts) == 4, (
-            f"expected 4-tuple, got {len(parts)} in {CUSTOM_COMMAND_MENU.name}: {raw!r}"
+        # Match quoted fields so commas inside a command don't split the tuple.
+        match = _GVARIANT_MENU_TUPLE.fullmatch(body)
+        assert match, (
+            f"expected ('label', 'command', 'accel', bool) 4-tuple in "
+            f"{CUSTOM_COMMAND_MENU.name}: {raw!r}"
         )
-        label = parts[0].strip("'")
-        command = parts[1].strip("'")
-        accelerator = parts[2].strip("'")
-        enabled = parts[3] == "true"
+        label, command, accelerator = (
+            re.sub(r"\\(.)", r"\1", g) for g in match.group(1, 2, 3)
+        )
+        enabled = match.group(4) == "true"
         entries[slot] = (label, command, accelerator, enabled)
     return entries, order
 
@@ -957,8 +964,7 @@ def test_ask_bluefin_slot_is_listed_in_command_order():
 
 def test_no_system_file_references_ask_projectbluefin_io():
     """ask.projectbluefin.io is being shut down; no shipped file should still
-    point at it. Caught by ripgrep in CI; this assertion makes the intent
-    explicit and lets a single PR prove the cleanup."""
+    point at it. This test is the only gate enforcing that."""
     offenders: list[Path] = []
     for path in ROOT.glob("system_files/**/*"):
         if not path.is_file():
