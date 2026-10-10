@@ -57,7 +57,9 @@ Brewfiles.
    before any state is written; a successful migration is a no-op on
    subsequent runs because the installed cask now matches `ublue-os/tap`.
 3. Hash all `preinstall.d/*.Brewfile` files combined.
-4. Compare to stored hash. **Identical → fast exit**, nothing touched.
+4. Compare to stored hash. **Identical → fast exit**, nothing touched —
+   unless step 2 just migrated, in which case continue to step 5 so the
+   rebranded cask gets installed.
 5. **Different:** snapshot installed formulae and casks, then run
    `brew bundle --file=` on each Brewfile (idempotent). A declaration already
    installed in the snapshot remains user-owned unless it was already present
@@ -133,14 +135,19 @@ the managed Brewfile and a non-`ublue-os/tap` chairlift is installed; once
 the installed cask matches `ublue-os/tap`, subsequent runs are no-ops gated on
 the same installed-state check. A failed uninstall aborts the run with exit 1
 and leaves the previous state hash untouched so the next login retries.
+A successful migration always reaches `brew bundle`, even with an unchanged
+hash. `frostyard/tap` is untapped only after every bundle succeeds; if a
+bundle fails and no chairlift is installed afterwards, the legacy cask is
+reinstalled from the still-present tap before exit 1, so the next login's
+gate sees it and retries the migration.
 Detection must read *installed* state only (`brew info --json=v2 --installed`,
 which enumerates the Caskroom and resolves each entry from its own installed
 caskfile): once both taps are present, the bare token `chairlift` is
-ambiguous, so `brew info --cask chairlift` either errors or answers for the
-new, uninstalled cask. An inconclusive answer migrates rather than skips —
-the bundle that runs immediately afterwards repairs a redundant uninstall,
-while a skipped migration strands the user on v0.10.1 with the hash already
-stamped.
+ambiguous, so `brew info --cask chairlift` and `brew list --cask chairlift`
+either error or answer for the new, uninstalled cask. An inconclusive answer
+migrates rather than skips — the bundle that runs immediately afterwards
+repairs a redundant uninstall, while a skipped migration strands the user on
+v0.10.1 with the hash already stamped.
 
 Bluefin owns the maintainer defaults at `/usr/share/chairlift/config.yml`
 (`system_files/shared/usr/share/chairlift/config.yml` in this repo). Admins own
