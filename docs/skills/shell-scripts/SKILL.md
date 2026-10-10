@@ -138,8 +138,8 @@ settings, or `uupd-resume.timer` are changed.
 If the block device backing `/var` (`findmnt -T /var`) has no `crypt` layer in
 `lsblk -s`, `enable` warns that the hibernation image will be unencrypted on
 disk and asks for confirmation on the terminal. Without a terminal it refuses
-unless `HIBERNATION_ACCEPT_PLAINTEXT=1` is set; the recipe preserves that
-variable across its `sudo` re-exec.
+unless `HIBERNATION_ACCEPT_PLAINTEXT=1` is set; the helper forwards that
+variable across its `sudo` re-exec only when it is set.
 
 GNOME retains its AC/battery idle timeouts. On GNOME installations, a drop-in
 makes `systemd-suspend.service` perform suspend-then-hibernate; this also affects
