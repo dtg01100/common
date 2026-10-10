@@ -898,7 +898,9 @@ _GVARIANT_MENU_TUPLE = re.compile(
 )
 
 
-def _parse_custom_command_menu() -> tuple[dict[int, tuple[str, str, str, bool]], list[int]]:
+def _parse_custom_command_menu(
+    path: Path = CUSTOM_COMMAND_MENU,
+) -> tuple[dict[int, tuple[str, str, str, bool]], list[int]]:
     """Parse the dconf-style key=value entries into a slot map + the order list.
 
     The file uses single-quoted GVariant strings and unquoted integers. The
@@ -906,7 +908,7 @@ def _parse_custom_command_menu() -> tuple[dict[int, tuple[str, str, str, bool]],
     """
     entries: dict[int, tuple[str, str, str, bool]] = {}
     order: list[int] = []
-    for raw in CUSTOM_COMMAND_MENU.read_text(encoding="utf-8").splitlines():
+    for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -939,6 +941,20 @@ def _parse_custom_command_menu() -> tuple[dict[int, tuple[str, str, str, bool]],
         enabled = match.group(4) == "true"
         entries[slot] = (label, command, accelerator, enabled)
     return entries, order
+
+
+def test_menu_parser_keeps_commas_and_escaped_quotes_inside_fields(tmp_path):
+    """Covers #1431: a comma in a quoted field must not split the tuple, and
+    GVariant's backslash-escaped quote (\\') must round-trip to a bare '."""
+    menu = tmp_path / "menu"
+    menu.write_text(
+        "command-order=[1]\n"
+        r"command1=('A, B', 'echo \'x, y\'', '', true)" "\n",
+        encoding="utf-8",
+    )
+    entries, order = _parse_custom_command_menu(menu)
+    assert order == [1]
+    assert entries[1] == ("A, B", "echo 'x, y'", "", True)
 
 
 def test_ask_bluefin_menu_entry_dispatches_via_chairlift_wrapper():
