@@ -882,7 +882,7 @@ CUSTOM_COMMAND_MENU = (
     ROOT / "system_files/bluefin/etc/dconf/db/distro.d/04-bluefin-custom-command-menu"
 )
 ASK_BLUEFIN_LABEL = "Ask Bluefin"
-ASK_BLUEFIN_SLOT = 12
+ASK_BLUEFIN_SLOT = 11
 ASK_BLUEFIN_COMMAND = f"{CHAIRLIFT_WRAPPER} --ask-bluefin"
 
 
