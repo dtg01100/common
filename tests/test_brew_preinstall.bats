@@ -1121,18 +1121,35 @@ write_chairlift_brew_mock() {
     local taps="$4" uninstall_rc="${5:-0}" bundle_rc="${6:-0}"
     local install_rc="${7:-0}" other_bundle_rc="${8:-0}"
     printf '%s %s\n' "${installed_tap}" "${installed_version}" > "${WORKDIR}/chairlift.installed"
+    rm -rf "${WORKDIR}/Caskroom/chairlift"
+    [[ "${installed_tap}" == none ]] || mkdir -p "${WORKDIR}/Caskroom/chairlift"
 
     cat > "${WORKDIR}/bin/brew" << BREWMOCK
 #!/usr/bin/env bash
 BREW_LOG="\${BREW_LOG:-/dev/null}"
 printf 'brew %s\n' "\$*" >> "\${BREW_LOG}"
 read -r installed_tap installed_version < '${WORKDIR}/chairlift.installed'
+# Keep the Caskroom entry the script's cheap pre-check reads in step with
+# whatever this invocation leaves installed.
+sync_caskroom() {
+    local tap _
+    read -r tap _ < '${WORKDIR}/chairlift.installed'
+    if [[ "\${tap}" == none ]]; then
+        rm -rf '${WORKDIR}/Caskroom/chairlift'
+    else
+        mkdir -p '${WORKDIR}/Caskroom/chairlift'
+    fi
+}
+trap sync_caskroom EXIT
 tapped_version='${tapped_version}'
 taps='${taps}'
 ambiguous=0
 [[ " \${taps} " == *" frostyard/tap "* && " \${taps} " == *" ublue-os/tap "* ]] && ambiguous=1
 case "\$1" in
-    shellenv) printf 'export PATH="%s:\${PATH}"\n' "${WORKDIR}/bin" ;;
+    shellenv)
+        printf 'export HOMEBREW_PREFIX="%s"\n' "${WORKDIR}"
+        printf 'export PATH="%s:\${PATH}"\n' "${WORKDIR}/bin"
+        ;;
     tap)
         if [[ \$# -eq 1 ]]; then
             printf '%s\n' \${taps}
@@ -1141,6 +1158,7 @@ case "\$1" in
     trust|untap) exit 0 ;;
     info)
         if [[ "\$*" == *"--json=v2 --installed"* ]]; then
+            [[ -e '${WORKDIR}/installed-info.fail' ]] && exit 1
             if [[ "\${installed_tap}" == none ]]; then
                 echo '{"formulae":[],"casks":[]}'
             elif [[ "\${installed_tap}" == unknown ]]; then
@@ -1329,6 +1347,42 @@ BREWFILE
     # rather than a user-installed holdover.
     jq -e '.casks == ["ublue-os/tap/chairlift"]' \
         "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
+}
+
+@test "brew-preinstall: no Caskroom chairlift skips the installed-inventory query" {
+    # Runs every login: without a Caskroom entry there is nothing to
+    # migrate, so the unchanged-hash path must not pay for a full
+    # `brew info --json=v2 --installed` inventory.
+    write_rebranded_chairlift_brewfile
+    current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
+    mkdir -p "${WORKDIR}/.local/share/ublue-os"
+    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+        > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
+    write_chairlift_brew_mock none "" 0.12.2 "frostyard/tap ublue-os/tap"
+
+    BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
+    [ "${status}" -eq 0 ]
+    [[ "${output}" == *"nothing to do"* ]]
+    run grep -q "brew info --json=v2 --installed" "${WORKDIR}/brew.log"
+    [ "${status}" -eq 1 ]
+    run grep -q "brew uninstall --cask" "${WORKDIR}/brew.log"
+    [ "${status}" -eq 1 ]
+}
+
+@test "brew-preinstall: failed installed-inventory query warns instead of silently skipping migration" {
+    write_rebranded_chairlift_brewfile
+    current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
+    mkdir -p "${WORKDIR}/.local/share/ublue-os"
+    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+        > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap"
+    touch "${WORKDIR}/installed-info.fail"
+
+    BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
+    [ "${status}" -eq 0 ]
+    [[ "${output}" == *"warning: brew info --installed failed; skipping legacy chairlift check"* ]]
+    run grep -q "brew uninstall --cask" "${WORKDIR}/brew.log"
+    [ "${status}" -eq 1 ]
 }
 
 @test "brew-preinstall: stranded chairlift migration is idempotent on subsequent runs" {

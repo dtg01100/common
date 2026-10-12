@@ -122,12 +122,25 @@ fi
 #
 # The gate itself must not use `brew list --cask chairlift` either: it
 # resolves the bare token first and raises the same ambiguity error.
+#
+# This runs on every login, so a plain Caskroom directory test keeps the
+# common no-ChairLift path free of the full installed-inventory query.
+#
+# If the inventory query itself fails there is no answer to act on, so the
+# migration is skipped for this run with a warning; the gate sits before the
+# hash early-exit, so the next login retries it.
 installed_chairlift() {
-    brew info --json=v2 --installed 2>/dev/null \
-        | jq -c 'first(.casks[]? | select(.token == "chairlift")) // empty' 2>/dev/null || true
+    local inventory
+    if ! inventory=$(brew info --json=v2 --installed 2>/dev/null); then
+        echo "brew-preinstall: warning: brew info --installed failed; skipping legacy chairlift check this run" >&2
+        return 0
+    fi
+    jq -c 'first(.casks[]? | select(.token == "chairlift")) // empty' \
+        <<< "${inventory}" 2>/dev/null || true
 }
+caskroom="${HOMEBREW_PREFIX:-${BREW_BIN%/bin/brew}}/Caskroom"
 installed_chairlift_json=""
-if [[ "${external_chairlift}" -eq 0 ]] \
+if [[ "${external_chairlift}" -eq 0 && -d "${caskroom}/chairlift" ]] \
     && grep -qs "ublue-os/tap/chairlift" "${brewfiles[@]}"; then
     installed_chairlift_json=$(installed_chairlift)
 fi

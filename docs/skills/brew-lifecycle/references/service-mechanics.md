@@ -144,7 +144,11 @@ Detection must read *installed* state only (`brew info --json=v2 --installed`,
 which enumerates the Caskroom and resolves each entry from its own installed
 caskfile): once both taps are present, the bare token `chairlift` is
 ambiguous, so `brew info --cask chairlift` and `brew list --cask chairlift`
-either error or answer for the new, uninstalled cask. An inconclusive answer
+either error or answer for the new, uninstalled cask. Because the gate runs
+every login, that inventory query is only issued when
+`$HOMEBREW_PREFIX/Caskroom/chairlift` exists. If the query itself fails, the
+run logs `warning: brew info --installed failed` and skips the migration for
+that run; the next login retries it. An inconclusive installed tap
 migrates rather than skips — the bundle that runs immediately afterwards
 repairs a redundant uninstall, while a skipped migration strands the user on
 v0.10.1 with the hash already stamped.
