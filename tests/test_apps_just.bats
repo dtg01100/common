@@ -359,10 +359,13 @@ _run_cncf() {
     [[ "$output" != *"Installing OpenTabletDriver..."* ]]
 }
 
-@test "install-opentabletdriver: uninstall removes the flathub package" {
+@test "install-opentabletdriver: uninstall removes the flatpak package" {
+    # No `flathub` ref: `flatpak --system remove` takes an app ID only, and a
+    # second ref is a fuzzy match that only warns. See projectbluefin/common#1455.
     MOCK_GUM_CONFIRM_EXIT=1 _run_otd
     [ "$status" -eq 0 ]
-    grep -q "flatpak --system remove -y flathub net.opentabletdriver.OpenTabletDriver" "${COMMAND_LOG}"
+    grep -q "flatpak --system remove -y net.opentabletdriver.OpenTabletDriver" "${COMMAND_LOG}"
+    ! grep -q "flatpak --system remove -y flathub " "${COMMAND_LOG}"
 }
 
 @test "install-opentabletdriver: uninstall makes no network calls" {
@@ -371,9 +374,17 @@ _run_cncf() {
     ! grep -q "^curl " "${COMMAND_LOG}"
 }
 
-@test "install-opentabletdriver: uninstall does not touch the user service unit" {
+@test "install-opentabletdriver: uninstall stops and removes the user service unit" {
+    # Seed the unit an earlier install would have left behind. The bug
+    # (projectbluefin/common#1455) left it enabled with Restart=always/3s, so it
+    # restarted forever after the flatpak was gone. Uninstall must disable it,
+    # delete it, and reload systemd so the loop is truly gone.
+    mkdir -p "${HOMEDIR}/.config/systemd/user"
+    printf '%s\n' "[Unit]\n[Service]\nExecStart=flatpak run net.opentabletdriver.OpenTabletDriver -d\nRestart=always\nRestartSec=3\n[Install]\nWantedBy=graphical-session.target\n" > "${HOMEDIR}/.config/systemd/user/opentabletdriver.service"
     MOCK_GUM_CONFIRM_EXIT=1 _run_otd
     [ "$status" -eq 0 ]
+    grep -q "systemctl --user disable --now opentabletdriver.service" "${COMMAND_LOG}"
+    grep -q "systemctl --user daemon-reload" "${COMMAND_LOG}"
     [ ! -f "${HOMEDIR}/.config/systemd/user/opentabletdriver.service" ]
 }
 

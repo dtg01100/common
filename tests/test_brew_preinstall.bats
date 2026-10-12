@@ -1170,8 +1170,8 @@ case "\$1" in
             fi
             exit 0
         fi
-        if [[ "\$*" == *"ublue-os/tap/chairlift"* ]]; then
-            printf '{"casks":[{"token":"chairlift","tap":"ublue-os/tap","version":"%s"}]}\n' \\
+        if [[ "\$*" == *"projectbluefin/tap/chairlift"* ]]; then
+            printf '{"casks":[{"token":"chairlift","tap":"projectbluefin/tap","version":"%s"}]}\n' \\
                 "\${tapped_version}"
             exit 0
         fi
@@ -1202,7 +1202,7 @@ case "\$1" in
         ;;
     bundle)
         if [[ "\$*" == *chairlift.Brewfile* ]]; then
-            [[ ${bundle_rc} -eq 0 ]] && printf 'ublue-os/tap %s\n' "\${tapped_version}" \\
+            [[ ${bundle_rc} -eq 0 ]] && printf 'projectbluefin/tap %s\n' "\${tapped_version}" \\
                 > '${WORKDIR}/chairlift.installed'
             exit ${bundle_rc}
         fi
@@ -1215,19 +1215,30 @@ BREWMOCK
 
 write_rebranded_chairlift_brewfile() {
     cat > "${WORKDIR}/preinstall.d/chairlift.Brewfile" << 'BREWFILE'
-tap "ublue-os/tap", trusted: true
-cask "ublue-os/tap/chairlift"
+tap "projectbluefin/tap", trusted: true
+cask "projectbluefin/tap/chairlift"
 BREWFILE
 }
 
 @test "brew-preinstall: uninstalls legacy frostyard/tap/chairlift before bundling new cask" {
     write_rebranded_chairlift_brewfile
-    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap"
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 0 ]
     grep -q "brew uninstall --cask frostyard/tap/chairlift" "${WORKDIR}/brew.log"
     grep -q "brew untap frostyard/tap" "${WORKDIR}/brew.log"
+}
+
+@test "brew-preinstall: migrates ublue-os/tap/chairlift without untapping ublue-os/tap" {
+    # Same version on both taps: the installed tap, not the version, decides.
+    write_rebranded_chairlift_brewfile
+    write_chairlift_brew_mock ublue-os/tap 26.10.5 26.10.5 "ublue-os/tap projectbluefin/tap"
+
+    BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
+    [ "${status}" -eq 0 ]
+    grep -Fxq "brew uninstall --cask ublue-os/tap/chairlift" "${WORKDIR}/brew.log"
+    ! grep -q "brew untap" "${WORKDIR}/brew.log"
 }
 
 @test "brew-preinstall: migrates even when the bare chairlift token is ambiguous" {
@@ -1237,7 +1248,7 @@ BREWFILE
     # the run stamped its hash and never retried — stranding the user on the
     # pre-rebrand build. An unreadable tap must migrate, not skip.
     write_rebranded_chairlift_brewfile
-    write_chairlift_brew_mock unknown 0.10.1 0.12.2 "frostyard/tap ublue-os/tap"
+    write_chairlift_brew_mock unknown 0.10.1 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 0 ]
@@ -1250,18 +1261,18 @@ BREWFILE
     # matches what the new tap ships: nothing legacy to migrate, so no
     # pointless uninstall/reinstall churn on every Brewfile change.
     write_rebranded_chairlift_brewfile
-    write_chairlift_brew_mock unknown 0.12.2 0.12.2 "frostyard/tap ublue-os/tap"
+    write_chairlift_brew_mock unknown 0.12.2 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 0 ]
     ! grep -q "brew uninstall --cask" "${WORKDIR}/brew.log"
 }
 
-@test "brew-preinstall: migrates a stranded chairlift after frostyard/tap is gone" {
+@test "brew-preinstall: migrates a stranded chairlift after its legacy tap is gone" {
     # The legacy tap can be untapped while its cask stays installed; the
     # bare token is then unambiguous and is the only name left to uninstall.
     write_rebranded_chairlift_brewfile
-    write_chairlift_brew_mock unknown 0.10.1 0.12.2 "ublue-os/tap"
+    write_chairlift_brew_mock unknown 0.10.1 0.12.2 "projectbluefin/tap"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 0 ]
@@ -1273,7 +1284,7 @@ BREWFILE
     # frostyard/tap is still tapped, so the bare token resolves to its frozen
     # cask — but ChairLift is not installed. Nothing to migrate.
     write_rebranded_chairlift_brewfile
-    write_chairlift_brew_mock none "" 0.12.2 "frostyard/tap ublue-os/tap"
+    write_chairlift_brew_mock none "" 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 0 ]
@@ -1284,7 +1295,7 @@ BREWFILE
 
 @test "brew-preinstall: leaves an installed non-legacy chairlift alone" {
     write_rebranded_chairlift_brewfile
-    write_chairlift_brew_mock ublue-os/tap 0.12.2 0.12.2 "frostyard/tap ublue-os/tap"
+    write_chairlift_brew_mock projectbluefin/tap 0.12.2 0.12.2 "ublue-os/tap projectbluefin/tap"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 0 ]
@@ -1306,7 +1317,7 @@ BREWFILE
 
 @test "brew-preinstall: legacy chairlift migration failure keeps state unstamped and fails" {
     write_rebranded_chairlift_brewfile
-    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap" 1
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap" 1
 
     run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 1 ]
@@ -1324,16 +1335,16 @@ BREWFILE
     write_rebranded_chairlift_brewfile
     current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
     mkdir -p "${WORKDIR}/.local/share/ublue-os"
-    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+    printf '{"hash":"%s","packages":[],"casks":["projectbluefin/tap/chairlift"]}\n' "${current_hash}" \
         > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
-    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap"
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 0 ]
     grep -q "brew uninstall --cask frostyard/tap/chairlift" "${WORKDIR}/brew.log"
     grep -q "brew untap frostyard/tap" "${WORKDIR}/brew.log"
     # Migration uninstalls the legacy cask; brew bundle must then run so
-    # the rebranded ublue-os/tap/chairlift actually gets installed.
+    # the rebranded projectbluefin/tap/chairlift actually gets installed.
     # Without this pass the machine has no ChairLift binary at all.
     grep -q "brew bundle --file=${WORKDIR}/preinstall.d/chairlift.Brewfile" "${WORKDIR}/brew.log"
     [[ "${output}" == *"migrating legacy chairlift"* ]]
@@ -1345,7 +1356,7 @@ BREWFILE
     [ "${stored_hash}" = "${current_hash}" ]
     # The managed cask list now reflects the rebranded cask as owned by us
     # rather than a user-installed holdover.
-    jq -e '.casks == ["ublue-os/tap/chairlift"]' \
+    jq -e '.casks == ["projectbluefin/tap/chairlift"]' \
         "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
 }
 
@@ -1356,9 +1367,9 @@ BREWFILE
     write_rebranded_chairlift_brewfile
     current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
     mkdir -p "${WORKDIR}/.local/share/ublue-os"
-    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+    printf '{"hash":"%s","packages":[],"casks":["projectbluefin/tap/chairlift"]}\n' "${current_hash}" \
         > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
-    write_chairlift_brew_mock none "" 0.12.2 "frostyard/tap ublue-os/tap"
+    write_chairlift_brew_mock none "" 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 0 ]
@@ -1373,9 +1384,9 @@ BREWFILE
     write_rebranded_chairlift_brewfile
     current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
     mkdir -p "${WORKDIR}/.local/share/ublue-os"
-    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+    printf '{"hash":"%s","packages":[],"casks":["projectbluefin/tap/chairlift"]}\n' "${current_hash}" \
         > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
-    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap"
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap"
     touch "${WORKDIR}/installed-info.fail"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
@@ -1386,16 +1397,16 @@ BREWFILE
 }
 
 @test "brew-preinstall: stranded chairlift migration is idempotent on subsequent runs" {
-    # After a successful migration the installed cask is ublue-os/tap, so
+    # After a successful migration the installed cask is projectbluefin/tap, so
     # the next boot must skip migration entirely and exit via the hash
     # early-exit. Regression guard against migration re-running on every
     # boot after success.
     write_rebranded_chairlift_brewfile
     current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
     mkdir -p "${WORKDIR}/.local/share/ublue-os"
-    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+    printf '{"hash":"%s","packages":[],"casks":["projectbluefin/tap/chairlift"]}\n' "${current_hash}" \
         > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
-    write_chairlift_brew_mock ublue-os/tap 0.12.2 0.12.2 "ublue-os/tap"
+    write_chairlift_brew_mock projectbluefin/tap 0.12.2 0.12.2 "ublue-os/tap projectbluefin/tap"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 0 ]
@@ -1414,9 +1425,9 @@ BREWFILE
     write_rebranded_chairlift_brewfile
     current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
     mkdir -p "${WORKDIR}/.local/share/ublue-os"
-    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+    printf '{"hash":"%s","packages":[],"casks":["projectbluefin/tap/chairlift"]}\n' "${current_hash}" \
         > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
-    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap" 1
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap" 1
 
     run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 1 ]
@@ -1428,7 +1439,7 @@ BREWFILE
 
 @test "brew-preinstall: external-chairlift flag skips legacy chairlift migration" {
     write_rebranded_chairlift_brewfile
-    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap"
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}" --external-chairlift
     [ "${status}" -eq 0 ]
@@ -1447,11 +1458,11 @@ BREWFILE
     write_rebranded_chairlift_brewfile
     current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
     mkdir -p "${WORKDIR}/.local/share/ublue-os"
-    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+    printf '{"hash":"%s","packages":[],"casks":["projectbluefin/tap/chairlift"]}\n' "${current_hash}" \
         > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
     # bundle_rc=1 simulates a failed bundle after migration uninstalled
     # the legacy cask; install_rc=0 means the rollback succeeds.
-    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap" 0 1 0
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap" 0 1 0
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 1 ]
@@ -1469,12 +1480,12 @@ BREWFILE
 }
 
 @test "brew-preinstall: no legacy rollback when the rebranded chairlift installed and another Brewfile failed" {
-    # Only an unrelated Brewfile failed; ublue-os/tap/chairlift is now
+    # Only an unrelated Brewfile failed; projectbluefin/tap/chairlift is now
     # installed, so reinstalling the legacy cask would fail on the
     # already-installed token and wrongly report "no chairlift".
     write_rebranded_chairlift_brewfile
     printf 'brew "jq"\n' > "${WORKDIR}/preinstall.d/other.Brewfile"
-    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap" 0 0 0 1
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap" 0 0 0 1
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 1 ]
@@ -1490,9 +1501,9 @@ BREWFILE
     write_rebranded_chairlift_brewfile
     current_hash="$(sha256sum "${WORKDIR}/preinstall.d/chairlift.Brewfile" | cut -d' ' -f1)"
     mkdir -p "${WORKDIR}/.local/share/ublue-os"
-    printf '{"hash":"%s","packages":[],"casks":["ublue-os/tap/chairlift"]}\n' "${current_hash}" \
+    printf '{"hash":"%s","packages":[],"casks":["projectbluefin/tap/chairlift"]}\n' "${current_hash}" \
         > "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json"
-    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap" 0 1 1
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap" 0 1 1
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 1 ]
@@ -1506,7 +1517,7 @@ BREWFILE
     # happy-path mirror of the rollback tests above: a successful bundle
     # after migration is what finally removes frostyard/tap.
     write_rebranded_chairlift_brewfile
-    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap"
+    write_chairlift_brew_mock frostyard/tap 0.10.1 0.12.2 "frostyard/tap ublue-os/tap projectbluefin/tap"
 
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 0 ]

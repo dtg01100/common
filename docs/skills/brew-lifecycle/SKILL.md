@@ -1,7 +1,7 @@
 ---
 name: brew-lifecycle
 version: "1.6"
-last_updated: "2026-10-10"
+last_updated: "2026-10-12"
 id: brew-lifecycle
 one_line_purpose: Manage OS-managed Homebrew packages and RPM/brew placement.
 entry_point: docs/skills/brew-lifecycle/SKILL.md
@@ -95,12 +95,12 @@ ChairLift is a managed cask installed for every user through
 `system_files/shared/usr/share/ublue-os/homebrew/preinstall.d/chairlift.Brewfile`:
 
 ```ruby
-tap "ublue-os/tap", trusted: true
-cask "ublue-os/tap/chairlift"
+tap "projectbluefin/tap", trusted: true
+cask "projectbluefin/tap/chairlift"
 ```
 
 The tap line requires `trusted: true`; Homebrew 6 blocks untrusted taps. The
-cask must remain pinned upstream in `ublue-os/tap` rather than being
+cask must remain pinned upstream in `projectbluefin/tap` rather than being
 replaced with a local mutable download in common.
 
 Bluefin owns `/usr/share/chairlift/config.yml`, shipped from
@@ -111,7 +111,7 @@ content or lifecycle code.
 ChairLift fails closed on schema drift: an unknown page, group, or field key in
 `config.yml` disables the whole application. Keep policy that has no upstream
 key in YAML comments, and verify with `python3 tests/check-chairlift-config`.
-The schema validator pin must follow the release in the `ublue-os/tap` cask.
+The schema validator pin must follow the release in the `projectbluefin/tap` cask.
 
 The cask cannot install root-owned files, so common ships ChairLift's system
 files for every image that consumes it: the common `Containerfile` downloads
@@ -126,9 +126,9 @@ schemas under `/usr/share/glib-2.0/schemas/` (0644). Downstream images need no
 ChairLift pin of their own; the composed image must run
 `glib-compile-schemas /usr/share/glib-2.0/schemas` after overlaying the shared
 files. To bump, change `ARG CHAIRLIFT_RELEASE`; there is no hash to copy.
-Renovate proposes that one-line PR and never automerges it, because it installs
-a new root helper. The build fails if the policy authorizes any helper path
-other than `/usr/bin/chairlift-helper`.
+Renovate proposes that one-line PR and automerges it when checks pass. The
+build fails if the policy authorizes any helper path other than
+`/usr/bin/chairlift-helper`.
 
 Bootc staging is authenticated and stage-only. ChairLift invokes the
 PolicyKit-gated `/usr/libexec/bootc-update-stage` helper, which runs plain
@@ -147,6 +147,18 @@ desktop file at `/usr/share/applications/io.projectbluefin.chairlift.desktop`
 upstream icons under `/usr/share/icons/hicolor/`, so every user gets a
 launcher.
 
+The Custom Command Menu entry `Ask Bluefin` invokes the same wrapper with
+`--ask-bluefin`. That flag ships in ChairLift ≥ v26.10.2; on older releases
+GApplication rejects the unknown option and the menu click is a silent
+no-op. ChairLift's Agents-page "Show Ask Bluefin in menu" switch only
+recognises the absolute wrapper form
+(`devmenu.AskBluefinWrapperCommand`) from v26.10.3; on v26.10.2 the menu
+entry dispatches but the switch cannot hide or show it. Older ChairLift pins
+must move to ≥ v26.10.3 (see ChairLift cask pin above) for the full Ask
+Bluefin behaviour. The absolute wrapper path is required because the menu
+runs each command through a non-interactive `bash -c` with no Homebrew on
+`PATH`.
+
 ### Hand ChairLift to a dedicated installer
 
 Images that supply their own ChairLift migration may invoke
@@ -154,8 +166,8 @@ Images that supply their own ChairLift migration may invoke
 common's existing behavior is unchanged. The opt-in excludes the entire
 `chairlift.Brewfile` from tapping, hashing, bundling and managed state, and
 protects the historical unqualified, Frostyard-qualified and Bluefin-qualified
-ChairLift cask names (`chairlift`, `frostyard/tap/chairlift` and
-`ublue-os/tap/chairlift`) from OS-diet removal. Other packages keep
+ChairLift cask names (`chairlift`, `frostyard/tap/chairlift`,
+`ublue-os/tap/chairlift` and `projectbluefin/tap/chairlift`) from OS-diet removal. Other packages keep
 their usual lifecycle.
 Keep that Brewfile dedicated to ChairLift; do not place unrelated packages in it.
 
@@ -174,8 +186,8 @@ call an older script that ignores the option.
 
 Homebrew 6.0 syntax — `trusted: true` is required:
 ```ruby
-tap "ublue-os/tap", trusted: true
-cask "ublue-os/tap/chairlift"
+tap "projectbluefin/tap", trusted: true
+cask "projectbluefin/tap/chairlift"
 ```
 Without `trusted: true` the tap is blocked and the formula is silently
 unavailable. See [placement-rules.md](references/placement-rules.md#homebrew-60-tap-trust-required-as-of-2026-06-11).

@@ -1,20 +1,20 @@
-FROM docker.io/library/golang:alpine@sha256:738d1cf061836894ff6bb8c33881080ac66de8cf0586615012a0c8f592649cfa AS umotd-build
+FROM docker.io/library/golang:alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS umotd-build
 RUN apk add git && \
     git clone https://github.com/projectbluefin/umotd /src && \
-    git -C /src checkout 97520c61e8fca7eae7359bf3d329542078f17412
+    git -C /src checkout e3c7ca93b16e6e5c574a4cb190b8bafa85321626
 WORKDIR /src
 RUN go build -ldflags="-s -w" -o /umotd .
 
-FROM docker.io/library/golang:alpine@sha256:738d1cf061836894ff6bb8c33881080ac66de8cf0586615012a0c8f592649cfa AS uwelcome-build
+FROM docker.io/library/golang:alpine@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS uwelcome-build
 RUN apk add git && \
     git clone https://github.com/projectbluefin/uwelcome /src && \
-    git -C /src checkout d260ccbb56db820f78b0b2a18b07c1a213918ce1
+    git -C /src checkout fe473df9ee63ff968aaa8c61fe34a33d081f5c1f
 WORKDIR /src
 RUN go build -ldflags="-s -w" -o /uwelcome .
 
 FROM docker.io/library/alpine:latest@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS build
 
-COPY --from=ghcr.io/ublue-os/bluefin-wallpapers-gnome:latest@sha256:470572484d5b7b8f5ce422f8a7af4fbdbe66f6a7075a5ae425ce0658f3e3738c / /out/bluefin/usr/share
+COPY --from=ghcr.io/projectbluefin/bluefin-wallpapers-gnome:latest@sha256:85d1c14c34d55a82ac310226eeeb0a165f2dd8aeb7800ab6039f915b02fcb5f3 / /out/bluefin/usr/share
 
 RUN apk add just curl
 
@@ -25,7 +25,7 @@ RUN apk add just curl
 # system_files. The release's checksums.txt is verified against its Sigstore
 # bundle, signed by ChairLift's release workflow for exactly this tag, and the
 # archive against its checksums.txt entry, so a bump changes CHAIRLIFT_RELEASE only.
-ARG CHAIRLIFT_RELEASE=v26.10.4
+ARG CHAIRLIFT_RELEASE=v26.10.5
 ARG TARGETARCH
 COPY --from=ghcr.io/sigstore/cosign/cosign:v3.1.3@sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8 /ko-app/cosign /usr/local/bin/cosign
 RUN set -eu; \
@@ -71,7 +71,7 @@ RUN set -eu; \
 
 # Artwork repo points to ~/.local/share for metadata
 RUN mkdir -p /out/bluefin/usr/share/backgrounds/bluefin && \
-  mv /out/bluefin/usr/share/*.jxl /out/bluefin/usr/share/*.xml /out/bluefin/usr/share/backgrounds/bluefin && \
+  mv /out/bluefin/usr/share/*.jxl /out/bluefin/usr/share/*.svg /out/bluefin/usr/share/*.xml /out/bluefin/usr/share/backgrounds/bluefin && \
   sed -i 's|~\/\.local\/share|\/usr\/share|' /out/bluefin/usr/share/backgrounds/bluefin/*.xml /out/bluefin/usr/share/gnome-background-properties/*.xml
 
 # Fetch game-devices-udev rules as individual raw files at a fixed commit SHA.

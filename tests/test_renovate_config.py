@@ -80,7 +80,7 @@ def test_wallpaper_custom_regex_manager():
         match = re.search(py_regex, content)
         if match:
             groups = match.groupdict()
-            assert groups.get("depName") == "ghcr.io/ublue-os/bluefin-wallpapers-gnome"
+            assert groups.get("depName") == "ghcr.io/projectbluefin/bluefin-wallpapers-gnome"
             assert groups.get("currentValue") == "latest"
             assert groups.get("currentDigest", "").startswith("sha256:")
             assert len(groups["currentDigest"]) == 71  # "sha256:" (7) + 64 hex chars
@@ -296,10 +296,10 @@ def test_chairlift_versioning_orders_prereleases():
     assert stable and stable.group("prerelease") is None, "a future stable tag must parse as stable"
 
 
-def test_chairlift_updates_offer_prereleases_and_do_not_automerge():
-    """Each ChairLift bump installs a new root-owned pkexec helper, so a human
-    reviews it and it must never automerge. And without ignoreUnstable: false
-    Renovate would not offer the prerelease-only ChairLift tags at all."""
+def test_chairlift_updates_offer_prereleases_and_automerge():
+    """ChairLift publishes prereleases only, so without ignoreUnstable: false
+    Renovate would not offer them. Automerge is enabled so releases merge
+    automatically when CI passes."""
     package_rules = _load_config().get("packageRules", [])
     rules = [
         rule
@@ -308,13 +308,7 @@ def test_chairlift_updates_offer_prereleases_and_do_not_automerge():
     ]
     assert len(rules) == 1, "expected one packageRule scoped to projectbluefin/chairlift"
     rule = rules[0]
-    assert rule.get("automerge") is False
+    assert rule.get("automerge") is True
+    assert rule.get("platformAutomerge") is True
     assert rule.get("ignoreUnstable") is False
-    assert "matchUpdateTypes" not in rule, "review applies to every bump, patch included"
-
-    automerge_index = next(
-        i for i, r in enumerate(package_rules) if r.get("automerge") is True
-    )
-    assert package_rules.index(rule) > automerge_index, (
-        "the ChairLift automerge: false rule must come after the repo-wide automerge rule"
-    )
+    assert "matchUpdateTypes" not in rule, "automerge applies to every bump, patch included"
