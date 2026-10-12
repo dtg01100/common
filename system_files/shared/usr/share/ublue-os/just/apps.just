@@ -66,8 +66,16 @@ install-opentabletdriver:
       systemctl enable --user --now opentabletdriver.service
     elif [ "${EXIT_CODE}" == 1 ] ; then
       echo "Uninstalling OpenTabletDriver..."
+      # Stop and remove the user service before the flatpak goes away. The
+      # pinned unit runs `flatpak run ...` with Restart=always / RestartSec=3,
+      # so once the flatpak is gone every restart exits non-zero and systemd
+      # relaunches it every ~3 s forever, and it comes back at every login.
+      # Disable first so the loop actually stops, then drop the unit and reload.
+      systemctl --user disable --now opentabletdriver.service 2>/dev/null || true
+      rm -f "$HOME/.config/systemd/user/opentabletdriver.service"
+      systemctl --user daemon-reload
       sudo rm -f /etc/modprobe.d/blacklist-opentabletdriver.conf /etc/udev/rules.d/71-opentabletdriver.rules
-      flatpak --system remove -y flathub net.opentabletdriver.OpenTabletDriver
+      flatpak --system remove -y net.opentabletdriver.OpenTabletDriver
     fi
 
 # Install CNCF tools from curated Brewfile
