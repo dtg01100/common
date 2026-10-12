@@ -1346,7 +1346,7 @@ BREWFILE
     BREW_LOG="${WORKDIR}/brew.log" run bash "${PATCHED_SCRIPT}"
     [ "${status}" -eq 0 ]
     [[ "${output}" == *"nothing to do"* ]]
-    ! grep -q "migrating legacy chairlift" "${output}"
+    [[ "${output}" != *"migrating legacy chairlift"* ]]
     ! grep -q "brew uninstall --cask" "${WORKDIR}/brew.log"
     stored_hash="$(jq -r '.hash' "${WORKDIR}/.local/share/ublue-os/brew-preinstall-state.json")"
     [ "${stored_hash}" = "${current_hash}" ]
